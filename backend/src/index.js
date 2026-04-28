@@ -1196,22 +1196,74 @@ Return only valid JSON.`
 
 app.post("/api/insurance/claim", async (req, res) => {
   try {
-    const { user_id, insurer_id, claim_amount, diagnosis, policy_document_url } = req.body;
+    const { 
+      user_id, 
+      purchase_id, 
+      claim_amount, 
+      diagnosis, 
+      symptoms, 
+      admission_type, 
+      treatment_type, 
+      hospital_name, 
+      doctor_note, 
+      policy_document_url 
+    } = req.body;
 
-    // AI Analyze urgency
-    const aiResult = await classifyInsuranceClaim(diagnosis, claim_amount);
-    
+    // AI Analyze claim
+    const prompt = `Analyze this insurance claim and return JSON:
+{
+  "is_valid": true/false,
+  "urgency": "normal|critical|emergency",
+  "recommended_deadline_hours": number,
+  "confidence_score": 0-100,
+  "reason": "short explanation"
+}
+
+Claim Data:
+- Diagnosis: ${diagnosis}
+- Symptoms: ${symptoms}
+- Admission Type: ${admission_type}
+- Hospital: ${hospital_name}
+- Claim Amount: ₹${claim_amount}
+- Doctor Note: ${doctor_note}
+
+Return only valid JSON.`;
+
+    let aiResult = {
+      urgency: 'normal',
+      confidence_score: 50,
+      recommended_deadline_hours: 720,
+      reason: 'AI analysis pending'
+    };
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: AI_MODEL,
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      });
+      aiResult = JSON.parse(response.choices[0]?.message?.content || "{}");
+    } catch (e) {
+      console.error("AI analysis failed", e);
+    }
+
     // Create claim in database
     const { data: claim, error } = await supabase
       .from("insurance_claims")
       .insert([{
         user_id,
-        insurer_id,
+        purchase_id: purchase_id || null,
         claim_amount,
         diagnosis,
-        urgency: aiResult.urgency,
-        deadline_hours: aiResult.recommended_deadline_hours,
-        status: "ai_reviewed",
+        symptoms,
+        admission_type,
+        treatment_type,
+        hospital_name,
+        doctor_note,
+        policy_document_url: policy_document_url || 'demo-policy.pdf',
+        urgency: aiResult.urgency || 'normal',
+        deadline_hours: aiResult.recommended_deadline_hours || 720,
+        status: "pending",
         ai_analysis: aiResult
       }])
       .select()
@@ -1219,7 +1271,7 @@ app.post("/api/insurance/claim", async (req, res) => {
 
     if (error) throw error;
 
-    // Blockchain hash
+    // Blockchain hash (demo)
     const policyHash = generateBlockchainHash(policy_document_url || claim.id);
     
     res.json({ 
@@ -1227,6 +1279,100 @@ app.post("/api/insurance/claim", async (req, res) => {
       claim: { ...claim, policy_hash: policyHash },
       aiResult 
     });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/insurance/policies", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("insurance_policies")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    res.json({ success: true, policies: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/insurance/purchases", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ success: false, error: "user_id is required" });
+
+    const { data, error } = await supabase
+      .from("insurance_purchases")
+      .select(`
+        *,
+        insurance_policies (*)
+      `)
+      .eq("user_id", user_id)
+      .eq("status", "active");
+
+    if (error) throw error;
+    res.json({ success: true, purchases: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/insurance/buy-demo", async (req, res) => {
+  try {
+    const { user_id, policy_id } = req.body;
+    if (!user_id || !policy_id) return res.status(400).json({ success: false, error: "Missing fields" });
+
+    const expiryDate = new Date();
+    expiryDate.setFullYear(expiryDate.getFullYear() + 1);
+
+    const { data, error } = await supabase
+      .from("insurance_purchases")
+      .insert({
+        user_id,
+        policy_id,
+        razorpay_order_id: `demo_order_${Date.now()}`,
+        razorpay_payment_id: `demo_pay_${Date.now()}`,
+        expiry_date: expiryDate.toISOString(),
+        status: 'active'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, purchase: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/insurance/cancel", async (req, res) => {
+  try {
+    const { purchase_id, user_id } = req.body;
+    const { error } = await supabase
+      .from("insurance_purchases")
+      .delete()
+      .eq("id", purchase_id)
+      .eq("user_id", user_id);
+
+    if (error) throw error;
+    res.json({ success: true, message: "Policy cancelled" });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.delete("/api/insurance/claims/clear", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const { error } = await supabase
+      .from("insurance_claims")
+      .delete()
+      .eq("user_id", user_id);
+
+    if (error) throw error;
+    res.json({ success: true, message: "Claims cleared" });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1406,6 +1552,95 @@ app.post("/api/rental/move-out", async (req, res) => {
   }
 });
 
+app.get("/api/rental/list", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("rental_agreements")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (error) throw error;
+    res.json({ success: true, rentals: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/rental/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: rental, error } = await supabase
+      .from("rental_agreements")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) throw error;
+    
+    const { data: evidence, error: eError } = await supabase
+      .from("evidence")
+      .select("*")
+      .eq("agreement_id", id);
+
+    res.json({ 
+      success: true, 
+      rental, 
+      images: evidence || [] 
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/inspection/upload", async (req, res) => {
+  try {
+    const { agreementId, type, images } = req.body;
+    
+    const evidenceData = images.map(img => ({
+      agreement_id: agreementId,
+      file_url: img.url,
+      file_type: type, // 'move-in' or 'move-out'
+      created_at: new Date().toISOString()
+    }));
+
+    const { data, error } = await supabase
+      .from("evidence")
+      .insert(evidenceData)
+      .select();
+
+    if (error) throw error;
+
+    // Update status
+    const status = type === 'move-in' ? 'active' : 'inspected';
+    await supabase.from("rental_agreements").update({ status }).eq("id", agreementId);
+
+    res.json({ success: true, images: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/analysis/run", async (req, res) => {
+  try {
+    const { agreementId } = req.body;
+    
+    // Fetch evidence
+    const { data: evidence } = await supabase.from("evidence").select("*").eq("agreement_id", agreementId);
+    
+    // AI Compare (Mock logic for demo, calls compareRentalPhotos)
+    const aiResult = await compareRentalPhotos(agreementId, evidence.filter(e => e.file_type === 'move-out'));
+    
+    await supabase.from("rental_agreements").update({ 
+      ai_assessment: aiResult,
+      status: 'inspected' 
+    }).eq("id", agreementId);
+
+    res.json({ success: true, analysis: aiResult });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 app.post("/api/rental/resolve", async (req, res) => {
   try {
     const { agreement_id, refund_amount, action } = req.body;
@@ -1414,7 +1649,7 @@ app.post("/api/rental/resolve", async (req, res) => {
       .from("rental_agreements")
       .update({ 
         status: action === "accept" ? "resolved" : "disputed",
-        refund_amount
+        ai_assessment: { ... (req.body.ai_assessment || {}), final_refund: refund_amount }
       })
       .eq("id", agreement_id)
       .select()

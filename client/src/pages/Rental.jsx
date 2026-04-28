@@ -8,12 +8,17 @@ const Rental = () => {
   const [agreements, setAgreements] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNewAgreement, setShowNewAgreement] = useState(false);
+  const [selectedAgreement, setSelectedAgreement] = useState(null);
+  const [showComparison, setShowComparison] = useState(false);
+  const [inspectionData, setInspectionData] = useState({ images: [], analysis: null });
+  
   const [formData, setFormData] = useState({
     property_address: '',
     total_deposit: '',
     monthly_rent: ''
   });
   const [submitting, setSubmitting] = useState(false);
+  const [busy, setBusy] = useState(null); // 'upload', 'analysis'
 
   useEffect(() => {
     fetchAgreements();
@@ -25,11 +30,10 @@ const Rental = () => {
       const userId = session?.user?.id || localStorage.getItem('zelcor_demo_id');
       
       if (userId) {
-        // For demo, fetch all and filter
-        const res = await axios.get(`${API_URL}/rental/agreements`);
-        const allAgreements = res.data.agreements || [];
-        const filtered = allAgreements.filter(a => a.tenant_id === userId || a.landlord_id === userId);
-        setAgreements(filtered);
+        const res = await axios.get(`${API_URL}/rental/list`);
+        const allAgreements = res.data.rentals || [];
+        // In demo, we might see all, but filter for realism
+        setAgreements(allAgreements);
       }
     } catch (error) {
       console.error('Error fetching agreements:', error);
@@ -38,20 +42,16 @@ const Rental = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleCreateAgreement = async (e) => {
     e.preventDefault();
     setSubmitting(true);
-    
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const userId = session?.user?.id || localStorage.getItem('zelcor_demo_id');
       
-      // For demo, use self as landlord
-      const landlordId = userId;
-      
       await axios.post(`${API_URL}/rental/agreement`, {
         tenant_id: userId,
-        landlord_id: landlordId,
+        landlord_id: userId, // Demo self-transaction
         property_address: formData.property_address,
         total_deposit: parseFloat(formData.total_deposit),
         monthly_rent: parseFloat(formData.monthly_rent)
@@ -63,253 +63,402 @@ const Rental = () => {
       alert('Rental agreement created! 50% deposit held in escrow.');
     } catch (error) {
       console.error('Error creating agreement:', error);
-      alert('Error creating agreement');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleMoveIn = async (agreementId) => {
+  const handleUploadInspection = async (agreementId, type) => {
+    setBusy('upload');
     try {
-      // Demo photos
-      const demoPhotos = ['photo1.jpg', 'photo2.jpg', 'photo3.jpg'];
-      await axios.post(`${API_URL}/rental/move-in`, {
-        agreement_id: agreementId,
-        photos: demoPhotos
+      // Demo photos based on type
+      const photos = type === 'move-in' 
+        ? [
+            { url: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?q=80&w=800', label: 'Bedroom Wall' },
+            { url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?q=80&w=800', label: 'Kitchen Floor' }
+          ]
+        : [
+            { url: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?q=80&w=800', label: 'Bedroom Wall' },
+            { url: 'https://images.unsplash.com/photo-1516455590571-18256e5bb9ff?q=80&w=800', label: 'Kitchen Floor' }
+          ];
+
+      await axios.post(`${API_URL}/inspection/upload`, {
+        agreementId,
+        type,
+        images: photos
       });
+      
+      alert(`${type === 'move-in' ? 'Move-in' : 'Move-out'} photos recorded successfully!`);
       fetchAgreements();
-      alert('Move-in photos recorded on blockchain!');
     } catch (error) {
-      console.error('Error recording move-in:', error);
+      console.error('Upload error:', error);
+    } finally {
+      setBusy(null);
     }
   };
 
-  const handleMoveOut = async (agreementId) => {
+  const handleRunAnalysis = async (agreementId) => {
+    setBusy('analysis');
     try {
-      const demoPhotos = ['photo1_out.jpg', 'photo2_out.jpg', 'photo3_out.jpg'];
-      await axios.post(`${API_URL}/rental/move-out`, {
-        agreement_id: agreementId,
-        photos: demoPhotos
-      });
+      const res = await axios.post(`${API_URL}/analysis/run`, { agreementId });
+      setInspectionData(prev => ({ ...prev, analysis: res.data.analysis }));
+      alert('AI analysis complete! Reviewing damage deductions.');
       fetchAgreements();
-      alert('Move-out photos recorded! AI is comparing...');
     } catch (error) {
-      console.error('Error recording move-out:', error);
+      console.error('Analysis error:', error);
+    } finally {
+      setBusy(null);
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'move_in_recorded': return 'bg-green-100 text-green-700';
-      case 'active': return 'bg-blue-100 text-blue-700';
-      case 'ai_assessed': return 'bg-purple-100 text-purple-700';
-      case 'resolved': return 'bg-gray-100 text-gray-700';
-      case 'disputed': return 'bg-red-100 text-red-700';
-      default: return 'bg-yellow-100 text-yellow-700';
+  const openComparison = async (agreement) => {
+    setSelectedAgreement(agreement);
+    try {
+      const res = await axios.get(`${API_URL}/rental/${agreement.id}`);
+      setInspectionData({
+        images: res.data.images || [],
+        analysis: res.data.rental.ai_assessment
+      });
+      setShowComparison(true);
+    } catch (error) {
+      console.error('Error fetching inspection details:', error);
+    }
+  };
+
+  const handleResolve = async (action) => {
+    try {
+      await axios.post(`${API_URL}/rental/resolve`, {
+        agreement_id: selectedAgreement.id,
+        refund_amount: inspectionData.analysis?.final_refund || selectedAgreement.escrow_amount,
+        action,
+        ai_assessment: inspectionData.analysis
+      });
+      setShowComparison(false);
+      fetchAgreements();
+      alert(action === 'accept' ? 'Deposit refund processed!' : 'Sent to arbitrator for review.');
+    } catch (error) {
+      console.error('Resolution error:', error);
     }
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#f8f9fc]">
+      <div className="flex items-center justify-center min-h-[400px]">
         <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-8">
-      <div className="flex items-center justify-between">
+    <div className="max-w-6xl mx-auto space-y-8 pb-20">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-4xl font-black text-[#191c1e] tracking-tight">Rental Protection</h1>
-          <p className="text-slate-500 mt-1">Protect your security deposit with blockchain-verified move-in proof.</p>
+          <p className="text-slate-500 mt-1">Blockchain-verified deposits with AI damage assessment.</p>
         </div>
         <button
           onClick={() => setShowNewAgreement(true)}
-          className="bg-primary text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] transition-all active:scale-[0.98]"
+          className="px-6 py-3 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
         >
-          + New Agreement
+          <span className="material-symbols-outlined">add_home</span>
+          New Agreement
         </button>
       </div>
 
-      {/* How It Works */}
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        <div className="bg-gradient-to-r from-primary/5 to-primary/10 rounded-2xl p-6 border border-primary/20">
-          <h3 className="font-bold text-lg mb-4">How Zelcor Rental Works</h3>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold">1</div>
-              <div>
-                <div className="font-medium">Create Agreement</div>
-                <div className="text-slate-500">50% deposit to escrow</div>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold">2</div>
-              <div>
-                <div className="font-medium">Move-In Photos</div>
-                <div className="text-slate-500">Hash on blockchain</div>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold">3</div>
-              <div>
-                <div className="font-medium">Move-Out Photos</div>
-                <div className="text-slate-500">AI compares damage</div>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center font-bold">4</div>
-              <div>
-                <div className="font-medium">Auto Refund</div>
-                <div className="text-slate-500">No dispute = full refund</div>
-              </div>
-            </div>
-          </div>
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Active Agreements</p>
+          <p className="text-3xl font-black text-slate-900">{agreements.filter(a => a.status !== 'resolved').length}</p>
+        </div>
+        <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Escrow Balance</p>
+          <p className="text-3xl font-black text-primary">₹{agreements.reduce((sum, a) => sum + (a.status !== 'resolved' ? a.escrow_amount : 0), 0).toLocaleString()}</p>
+        </div>
+        <div className="bg-white rounded-[32px] p-6 border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Protected Claims</p>
+          <p className="text-3xl font-black text-emerald-500">{agreements.filter(a => a.status === 'resolved').length}</p>
         </div>
       </div>
 
-      {/* Agreements List */}
-      <div className="max-w-6xl mx-auto px-6 pb-8">
-        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100">
-            <h2 className="font-bold text-lg">Your Rental Agreements</h2>
-          </div>
-          
-          {agreements.length === 0 ? (
-            <div className="p-12 text-center">
-              <div className="text-6xl mb-4">🏠</div>
-              <h3 className="text-xl font-bold text-slate-700">No agreements yet</h3>
-              <p className="text-slate-500 mt-2">Create your first rental agreement to protect your deposit</p>
+      {/* Main List */}
+      <div className="bg-white rounded-[40px] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-8 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+          <h2 className="text-xl font-black text-slate-900">Your Agreements</h2>
+          <span className="px-3 py-1 bg-white border border-slate-200 rounded-full text-[10px] font-black uppercase tracking-widest text-slate-500">
+            {agreements.length} Total
+          </span>
+        </div>
+
+        {agreements.length === 0 ? (
+          <div className="p-20 text-center">
+            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
+              <span className="material-symbols-outlined text-4xl text-slate-300">home_work</span>
             </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {agreements.map((agreement) => (
-                <div key={agreement.id} className="p-6 hover:bg-slate-50 transition">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-mono text-slate-400">#{agreement.id.slice(0, 8)}</span>
-                        <span className={`px-3 py-1 rounded-full text-xs font-bold ${getStatusColor(agreement.status)}`}>
-                          {agreement.status?.replace('_', ' ').toUpperCase()}
-                        </span>
-                      </div>
-                      <h3 className="text-lg font-bold mt-2">{agreement.property_address}</h3>
-                      <div className="flex gap-6 mt-2 text-sm text-slate-500">
-                        <span>💰 Deposit: ₹{agreement.total_deposit?.toLocaleString()}</span>
-                        <span>📦 Escrow: ₹{agreement.escrow_amount?.toLocaleString()}</span>
-                        <span>🏠 Rent: ₹{agreement.monthly_rent?.toLocaleString()}/mo</span>
-                      </div>
-                      {agreement.ai_assessment && (
-                        <div className="mt-3 p-3 bg-purple-50 rounded-lg">
-                          <div className="text-sm font-medium text-purple-700">AI Assessment</div>
-                          <div className="text-sm text-purple-600">
-                            Recommended Refund: ₹{agreement.ai_assessment.recommended_refund || agreement.escrow_amount}
-                          </div>
-                        </div>
-                      )}
+            <h3 className="text-xl font-black text-slate-900">No active rentals</h3>
+            <p className="text-slate-500 mt-2">Create an agreement to start protecting your deposit.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {agreements.map(agreement => (
+              <div key={agreement.id} className="p-8 hover:bg-slate-50/50 transition-all group">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                        agreement.status === 'active' ? 'bg-emerald-100 text-emerald-600' :
+                        agreement.status === 'inspected' ? 'bg-purple-100 text-purple-600' :
+                        agreement.status === 'resolved' ? 'bg-slate-100 text-slate-500' :
+                        'bg-amber-100 text-amber-600'
+                      }`}>
+                        {agreement.status?.replace('_', ' ')}
+                      </span>
+                      <span className="text-xs font-bold text-slate-400">#{agreement.id.slice(0, 8)}</span>
                     </div>
-                    <div className="flex flex-col gap-2">
-                      {agreement.status === 'pending' && (
-                        <button
-                          onClick={() => handleMoveIn(agreement.id)}
-                          className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
-                        >
-                          📸 Record Move-In
-                        </button>
-                      )}
-                      {agreement.status === 'move_in_recorded' && (
-                        <button
-                          onClick={() => handleMoveOut(agreement.id)}
-                          className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm font-medium hover:bg-orange-700"
-                        >
-                          📸 Record Move-Out
-                        </button>
-                      )}
-                      {agreement.status === 'ai_assessed' && (
-                        <button
-                          onClick={async () => {
-                            await axios.post(`${API_URL}/rental/resolve`, {
-                              agreement_id: agreement.id,
-                              refund_amount: agreement.ai_assessment?.recommended_refund || agreement.escrow_amount,
-                              action: 'accept'
-                            });
-                            fetchAgreements();
-                          }}
-                          className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90"
-                        >
-                          ✅ Accept & Refund
-                        </button>
-                      )}
+                    <h3 className="text-2xl font-black text-slate-900 mb-2">{agreement.property_address}</h3>
+                    <div className="flex flex-wrap gap-4 text-sm font-bold">
+                      <span className="text-slate-500 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-lg">payments</span>
+                        Rent: ₹{agreement.monthly_rent?.toLocaleString()}
+                      </span>
+                      <span className="text-slate-500 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-lg">account_balance_wallet</span>
+                        Deposit: ₹{agreement.total_deposit?.toLocaleString()}
+                      </span>
+                      <span className="text-primary flex items-center gap-1">
+                        <span className="material-symbols-outlined text-lg">lock</span>
+                        In Escrow: ₹{agreement.escrow_amount?.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    {agreement.status === 'pending' && (
+                      <button
+                        onClick={() => handleUploadInspection(agreement.id, 'move-in')}
+                        disabled={busy === 'upload'}
+                        className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-black transition-all flex items-center gap-2"
+                      >
+                        <span className="material-symbols-outlined text-lg">photo_camera</span>
+                        Record Move-In
+                      </button>
+                    )}
+                    {agreement.status === 'active' && (
+                      <button
+                        onClick={() => handleUploadInspection(agreement.id, 'move-out')}
+                        disabled={busy === 'upload'}
+                        className="px-6 py-3 bg-amber-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-700 transition-all flex items-center gap-2"
+                      >
+                        <span className="material-symbols-outlined text-lg">door_open</span>
+                        Record Move-Out
+                      </button>
+                    )}
+                    {(agreement.status === 'inspected' || agreement.status === 'resolved') && (
+                      <button
+                        onClick={() => openComparison(agreement)}
+                        className="px-6 py-3 bg-primary/10 text-primary rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-primary/20 transition-all flex items-center gap-2"
+                      >
+                        <span className="material-symbols-outlined text-lg">analytics</span>
+                        View Comparison
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Comparison Modal */}
+      {showComparison && selectedAgreement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-[40px] w-full max-w-6xl p-8 shadow-2xl my-8">
+            <div className="flex items-start justify-between mb-8">
+              <div>
+                <h3 className="text-3xl font-black text-slate-900">AI Damage Assessment</h3>
+                <p className="text-slate-500 mt-1">Comparing move-in and move-out evidence for {selectedAgreement.property_address}</p>
+              </div>
+              <button onClick={() => setShowComparison(false)} className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_350px] gap-8">
+              <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-4">
+                {['Bedroom Wall', 'Kitchen Floor'].map(label => {
+                  const moveIn = inspectionData.images.find(img => img.label === label && img.file_type === 'move-in');
+                  const moveOut = inspectionData.images.find(img => img.label === label && img.file_type === 'move-out');
+                  const report = inspectionData.analysis?.reports?.find(r => r.item === label);
+
+                  return (
+                    <div key={label} className="bg-slate-50 rounded-[32px] p-6 border border-slate-100">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-black text-slate-900">{label}</h4>
+                        {report && (
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                            report.status === 'DAMAGE' ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
+                          }`}>
+                            {report.status} • Deducted: ₹{report.deduction}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Move-In</p>
+                          {moveIn ? (
+                            <img src={moveIn.file_url} className="w-full h-48 object-cover rounded-2xl shadow-sm" alt="Move-in" />
+                          ) : (
+                            <div className="w-full h-48 bg-slate-200 rounded-2xl flex items-center justify-center italic text-slate-400 text-sm">No photo</div>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Move-Out</p>
+                          {moveOut ? (
+                            <img src={moveOut.file_url} className="w-full h-48 object-cover rounded-2xl shadow-sm" alt="Move-out" />
+                          ) : (
+                            <div className="w-full h-48 bg-slate-200 rounded-2xl flex items-center justify-center italic text-slate-400 text-sm">No photo</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-6">
+                <div className="bg-slate-900 rounded-[32px] p-8 text-white shadow-xl">
+                  <h4 className="text-sm font-black uppercase tracking-widest text-slate-400 mb-6">Financial Summary</h4>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400 font-medium">Original Deposit</span>
+                      <span className="font-black">₹{selectedAgreement.total_deposit?.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400 font-medium">In Escrow</span>
+                      <span className="font-black">₹{selectedAgreement.escrow_amount?.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-400">
+                      <span className="font-medium">Total Deductions</span>
+                      <span className="font-black">- ₹{inspectionData.analysis?.totalDeductions || 0}</span>
+                    </div>
+                    <div className="pt-6 border-t border-white/10 flex justify-between items-end">
+                      <span className="text-slate-400 font-medium pb-1">Net Refund</span>
+                      <span className="text-3xl font-black text-emerald-400">₹{(inspectionData.analysis?.finalRefund || selectedAgreement.escrow_amount).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
-              ))}
+
+                {!inspectionData.analysis ? (
+                  <button
+                    onClick={() => handleRunAnalysis(selectedAgreement.id)}
+                    disabled={busy === 'analysis'}
+                    className="w-full py-4 bg-primary text-white rounded-2xl font-black uppercase tracking-widest hover:bg-primary/90 transition-all flex items-center justify-center gap-2"
+                  >
+                    {busy === 'analysis' ? (
+                      <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined">psychology</span>
+                        Run AI Analysis
+                      </>
+                    )}
+                  </button>
+                ) : selectedAgreement.status !== 'resolved' ? (
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={() => handleResolve('accept')}
+                      className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                    >
+                      Accept & Refund
+                    </button>
+                    <button
+                      onClick={() => handleResolve('dispute')}
+                      className="w-full py-4 border border-rose-200 text-rose-600 rounded-2xl font-black uppercase tracking-widest hover:bg-rose-50 transition-all"
+                    >
+                      Dispute Assessment
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-6 bg-slate-50 rounded-2xl text-center border border-slate-100">
+                    <span className="material-symbols-outlined text-emerald-500 text-4xl mb-2">verified</span>
+                    <p className="font-black text-slate-900">Resolved</p>
+                    <p className="text-xs text-slate-500 mt-1">Transaction completed on blockchain.</p>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* New Agreement Modal */}
       {showNewAgreement && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl w-full max-w-lg mx-4 p-6">
-            <h2 className="text-xl font-bold mb-4">Create Rental Agreement</h2>
-            <form onSubmit={handleSubmit}>
-              <div className="space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-[40px] w-full max-w-lg p-8 shadow-2xl">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-2xl font-black text-slate-900">Create Agreement</h3>
+              <button onClick={() => setShowNewAgreement(false)} className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center hover:bg-slate-200 transition-colors">
+                <span className="material-symbols-outlined text-slate-600">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateAgreement} className="space-y-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Property Address</label>
+                <input
+                  type="text"
+                  value={formData.property_address}
+                  onChange={(e) => setFormData({ ...formData, property_address: e.target.value })}
+                  className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:border-primary focus:outline-none font-bold"
+                  placeholder="e.g. 301, Sunrise Apartments"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Property Address</label>
-                  <input
-                    type="text"
-                    value={formData.property_address}
-                    onChange={(e) => setFormData({ ...formData, property_address: e.target.value })}
-                    placeholder="e.g., 301, Sunrise Apartments, Andheri East"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-primary focus:outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Security Deposit (₹)</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Total Deposit (₹)</label>
                   <input
                     type="number"
                     value={formData.total_deposit}
                     onChange={(e) => setFormData({ ...formData, total_deposit: e.target.value })}
-                    placeholder="e.g., 80000"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-primary focus:outline-none"
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:border-primary focus:outline-none font-bold"
+                    placeholder="80000"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Monthly Rent (₹)</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Monthly Rent (₹)</label>
                   <input
                     type="number"
                     value={formData.monthly_rent}
                     onChange={(e) => setFormData({ ...formData, monthly_rent: e.target.value })}
-                    placeholder="e.g., 25000"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-primary focus:outline-none"
+                    className="w-full px-5 py-4 rounded-2xl border border-slate-200 focus:border-primary focus:outline-none font-bold"
+                    placeholder="25000"
                     required
                   />
                 </div>
               </div>
-              <div className="bg-yellow-50 p-3 rounded-lg mt-4 text-sm text-yellow-700">
-                💡 50% of deposit (₹{Math.round(formData.total_deposit || 0) / 2}) will be held in Zelcor escrow
+
+              <div className="p-6 bg-primary/5 rounded-3xl border border-primary/10">
+                <div className="flex items-center gap-3 text-primary mb-2">
+                  <span className="material-symbols-outlined">info</span>
+                  <p className="font-black text-xs uppercase tracking-widest">Escrow Guarantee</p>
+                </div>
+                <p className="text-sm text-slate-600 font-medium">
+                  50% of the deposit (₹{(formData.total_deposit / 2 || 0).toLocaleString()}) will be locked in Zelcor's smart contract to guarantee a fair refund.
+                </p>
               </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowNewAgreement(false)}
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-medium hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-primary/90 disabled:opacity-50"
-                >
-                  {submitting ? 'Creating...' : 'Create Agreement'}
-                </button>
-              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-4 bg-primary text-white rounded-2xl font-bold hover:bg-primary/90 transition-all shadow-lg shadow-primary/20"
+              >
+                {submitting ? 'Creating...' : 'Launch Agreement'}
+              </button>
             </form>
           </div>
         </div>

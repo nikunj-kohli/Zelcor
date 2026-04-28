@@ -8,8 +8,16 @@ const Layout = () => {
   const path = location.pathname;
 
   // Define which pages should have the sidebar
-  // User said: home, my order, zelcor wallet, complaints
-  const sidebarPaths = ['/dashboard', '/orders', '/wallet', '/complaints'];
+  const sidebarPaths = [
+    '/dashboard', 
+    '/orders', 
+    '/wallet', 
+    '/complaints', 
+    '/shop', 
+    '/insurance', 
+    '/rental', 
+    '/profile'
+  ];
   const showSidebar = sidebarPaths.includes(path) || path.startsWith('/complaint/');
 
   return (

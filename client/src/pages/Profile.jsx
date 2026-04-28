@@ -60,6 +60,16 @@ const Profile = () => {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      localStorage.removeItem('zelcor_demo_id');
+      navigate('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
   return (
     <div className="max-w-[800px] mx-auto space-y-8">
       <div className="bg-white rounded-[48px] border border-slate-100 shadow-xl overflow-hidden">
@@ -173,6 +183,16 @@ const Profile = () => {
            <p className="text-xs text-[#f27a6b]/60 leading-relaxed">You are currently a Customer. Switch to Enterprise to start protecting your sales and managing your own company bond.</p>
            <button className="w-full py-4 bg-[#f27a6b] text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] hover:opacity-90 transition-all">Apply for Enterprise</button>
         </div>
+      </div>
+
+      <div className="flex justify-center pt-8">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-8 py-4 bg-red-50 text-red-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-red-100 transition-all border border-red-100 shadow-sm"
+        >
+          <span className="material-symbols-outlined text-lg">logout</span>
+          Log Out of Zelcor
+        </button>
       </div>
     </div>
   );

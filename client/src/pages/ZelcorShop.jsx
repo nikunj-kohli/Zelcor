@@ -49,54 +49,6 @@ const extractNameFromUrl = (url) => {
   }
 };
 
-const isBadPrice = (p) => !Number.isFinite(p) || p <= 0;
-
-const minExpectedPriceForName = (name = '') => {
-  const n = name.toLowerCase();
-  if (n.includes('macbook')) return 50000;
-  if (n.includes('iphone')) return 30000;
-  if (n.includes('ipad')) return 15000;
-  if (n.includes('airpods')) return 8000;
-  if (n.includes('watch')) return 8000;
-  if (n.includes('camera') || n.includes('nikon') || n.includes('canon')) return 20000;
-  if (n.includes('laptop')) return 25000;
-  if (n.includes('headphone') || n.includes('headphones')) return 300;
-  if (n.includes('earbud') || n.includes('earbuds')) return 200;
-  // For unknown categories, trust backend price if it is positive.
-  return 1;
-};
-
-const isUnrealisticPriceForName = (name, price) => {
-  if (!Number.isFinite(price)) return true;
-  return price < minExpectedPriceForName(name);
-};
-
-const getDemoImageByName = (name = '') => {
-  const n = name.toLowerCase();
-
-  // Stable, deterministic images for demo quality
-  if (n.includes('macbook') || n.includes('laptop')) {
-    return 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?auto=format&fit=crop&q=80&w=800';
-  }
-  if (n.includes('iphone')) {
-    return 'https://images.unsplash.com/photo-1696446701796-da61225697cc?auto=format&fit=crop&q=80&w=800';
-  }
-  if (n.includes('headphone') || n.includes('headphones')) {
-    return 'https://images.unsplash.com/photo-1670055255470-362208f02905?auto=format&fit=crop&q=80&w=800';
-  }
-  if (n.includes('airpods') || n.includes('earbud') || n.includes('earbuds')) {
-    return 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?auto=format&fit=crop&q=80&w=800';
-  }
-  if (n.includes('watch')) {
-    return 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=800';
-  }
-  if (n.includes('camera') || n.includes('nikon') || n.includes('canon')) {
-    return 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800';
-  }
-
-  return 'https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&q=80&w=800';
-};
-
 const ZelcorShop = () => {
   const [loading, setLoading] = useState(false);
   const [amazonLink, setAmazonLink] = useState('');
@@ -110,15 +62,7 @@ const ZelcorShop = () => {
   const latestImportRequestRef = useRef(0);
   const navigate = useNavigate();
 
-  const products = [
-    { id: 'p1', name: 'MacBook Air M2', price: 95000, image: 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?auto=format&fit=crop&q=80&w=300' },
-    { id: 'p2', name: 'iPhone 15 Pro', price: 125000, image: 'https://images.unsplash.com/photo-1696446701796-da61225697cc?auto=format&fit=crop&q=80&w=300' },
-    { id: 'p3', name: 'Sony WH-1000XM5', price: 24900, image: 'https://images.unsplash.com/photo-1670055255470-362208f02905?auto=format&fit=crop&q=80&w=300' },
-    { id: 'p4', name: 'AirPods Pro 2', price: 21900, image: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?auto=format&fit=crop&q=80&w=300' }
-  ];
-
   useEffect(() => {
-    // Load cart from local storage if exists
     const savedCart = localStorage.getItem('zelcor_cart');
     if (savedCart) {
       setCart(JSON.parse(savedCart));
@@ -129,23 +73,14 @@ const ZelcorShop = () => {
     localStorage.setItem('zelcor_cart', JSON.stringify(cart));
   }, [cart]);
 
-  const handleAmazonLinkChange = (e) => {
-    setAmazonLink(e.target.value);
-    setImportError('');
-  };
-
   const handleAmazonImport = async () => {
     const url = amazonLink.trim();
-
     if (!url) {
       setImportError('Paste an Amazon product URL first.');
-      setScannedProduct(null);
       return;
     }
-
     if (!url.includes('amazon') && !url.includes('amzn')) {
       setImportError('Please paste a valid Amazon product URL.');
-      setScannedProduct(null);
       return;
     }
 
@@ -158,55 +93,26 @@ const ZelcorShop = () => {
       const res = await axios.post(`${API_URL}/shop/analyze-link`, { url });
       const product = res.data?.product;
 
-      if (!res.data?.success) {
-        throw new Error('Could not extract product details');
-      }
+      if (!res.data?.success) throw new Error('Extraction failed');
 
-      // Demo-reliable fallback (restore previous "looks correct" behavior)
-      const localName = extractNameFromUrl(url);
-      const apiName = cleanName(product?.name || '');
-      const safeName =
-        apiName && apiName !== 'Product Name' && apiName !== 'Amazon Imported Product'
-          ? apiName
-          : localName || 'Amazon Imported Product';
+      const safeName = cleanName(product?.name) || extractNameFromUrl(url) || 'Imported Product';
+      const safePrice = Number(product?.price) > 0 ? Math.round(product.price) : guessPriceFromName(safeName);
 
-      const apiPrice = Number(product?.price);
-      const safePrice =
-        !isBadPrice(apiPrice) && !isUnrealisticPriceForName(safeName, apiPrice)
-          ? Math.round(apiPrice)
-          : guessPriceFromName(safeName);
-
-      const fallbackImage = getDemoImageByName(safeName);
-      const safeImage =
-        product?.source === 'amazon-html' && product?.image
-          ? product.image
-          : fallbackImage;
-
-      if (latestImportRequestRef.current !== requestId) {
-        return;
-      }
+      if (latestImportRequestRef.current !== requestId) return;
 
       setScannedProduct({
         ...product,
         name: safeName,
         price: safePrice,
-        image: safeImage,
+        image: product?.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=800',
         id: `scanned-${requestId}`,
         url,
       });
     } catch (error) {
-      if (latestImportRequestRef.current !== requestId) {
-        return;
-      }
-
-      setScannedProduct(null);
-      setImportError(
-        error.response?.data?.error || 'Could not fetch the product from Amazon. Try a clean product URL with `/dp/ASIN`.'
-      );
+      if (latestImportRequestRef.current !== requestId) return;
+      setImportError('Could not fetch the product. Please check the URL.');
     } finally {
-      if (latestImportRequestRef.current === requestId) {
-        setLoading(false);
-      }
+      if (latestImportRequestRef.current === requestId) setLoading(false);
     }
   };
 
@@ -225,27 +131,20 @@ const ZelcorShop = () => {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return;
-    
     setLoading(true);
-    setDemoCheckoutError('');
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
-    const userId = user?.id || localStorage.getItem('zelcor_demo_id');
     
-    if (!userId) {
-      alert('Please login first');
-      navigate('/auth');
-      return;
-    }
-
     try {
-      // For demo purposes, we'll create the first order to get a Razorpay Order ID 
-      // In a real app, you'd create a 'Group Order' or handle multiple payments.
-      // Here, we'll create one 'Package' escrow for the whole cart.
+      const { data: { session } } = await supabase.auth.getSession();
+      const userId = session?.user?.id || localStorage.getItem('zelcor_demo_id');
       
+      if (!userId) {
+        navigate('/auth');
+        return;
+      }
+
       const res = await axios.post(`${API_URL}/escrows/create`, {
         buyer_id: userId,
-        item_name: cart.length > 1 ? `${cart.length} Products Package` : cart[0].name,
+        item_name: cart.length > 1 ? `${cart.length} Items Package` : cart[0].name,
         amount: totalAmount,
         company_wallet: '0x321...456',
         inspection_period_hours: 48
@@ -254,332 +153,243 @@ const ZelcorShop = () => {
       if (res.data.success) {
         const { escrow } = res.data;
         const paymentUrl = `${window.location.origin}/payment-success?escrow_id=${escrow.id}&demo=1`;
-
-        localStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify({
-          primaryEscrowId: escrow.id,
-          userId,
-          cart,
-          createdAt: Date.now(),
-        }));
+        localStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify({ primaryEscrowId: escrow.id, userId, cart, createdAt: Date.now() }));
         setDemoPaymentUrl(paymentUrl);
-        setShowDemoPayment(true);
-      } else {
-        setDemoCheckoutError(res.data?.error || 'Could not create escrow order.');
         setShowDemoPayment(true);
       }
     } catch (error) {
-      console.error('Checkout error:', error);
-      setDemoCheckoutError(error.response?.data?.error || error.message || 'Checkout failed');
-      setShowDemoPayment(true);
+      setDemoCheckoutError('Checkout failed. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="space-y-8">
-      {/* Marketplace Nav */}
-      <div className="flex items-center justify-between">
-        <nav className="flex gap-8 text-sm font-bold text-slate-400">
-          <span className="text-slate-900 border-b-2 border-primary pb-1">Marketplace</span>
-          <span className="hover:text-slate-600 cursor-pointer">Amazon Import</span>
-          <span className="hover:text-slate-600 cursor-pointer">Protection Plans</span>
-        </nav>
-        <button onClick={() => setShowCart(true)} className="relative p-3 bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-all flex items-center gap-3">
-          <span className="material-symbols-outlined text-primary">shopping_cart</span>
-          <span className="text-xs font-black uppercase tracking-widest text-slate-700">My Cart</span>
-          {cart.length > 0 && (
-            <span className="bg-primary text-white text-[10px] px-2 py-0.5 rounded-full font-black">
-              {cart.length}
-            </span>
-          )}
+    <div className="max-w-6xl mx-auto space-y-12 pb-20">
+      {/* Premium Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div>
+          <h1 className="text-5xl font-black text-[#191c1e] tracking-tight leading-none mb-2">Zelcor Shop</h1>
+          <p className="text-slate-500 font-medium text-lg">Buy from anywhere with blockchain escrow protection.</p>
+        </div>
+        <button 
+          onClick={() => setShowCart(true)}
+          className="relative px-6 py-4 bg-white border border-slate-100 rounded-[24px] shadow-sm hover:shadow-md transition-all flex items-center gap-4 group"
+        >
+          <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+            <span className="material-symbols-outlined">shopping_bag</span>
+          </div>
+          <div className="text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Cart</p>
+            <p className="text-sm font-black text-slate-900">{cart.length} Items</p>
+          </div>
+          {cart.length > 0 && <span className="absolute -top-2 -right-2 w-6 h-6 bg-primary text-white text-[10px] flex items-center justify-center rounded-full font-black animate-bounce">{cart.length}</span>}
         </button>
       </div>
 
-      {/* Cart Sidebar */}
-      <div className={`fixed inset-y-0 right-0 w-full md:w-96 bg-white shadow-2xl z-[100] transition-transform duration-500 transform ${showCart ? 'translate-x-0' : 'translate-x-full'}`}>
-        <div className="flex flex-col h-full">
-          <div className="p-8 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-h2 text-2xl tracking-tight">Your Protected Cart</h3>
-            <button onClick={() => setShowCart(false)} className="material-symbols-outlined text-slate-400 hover:text-slate-900 transition-colors">close</button>
+      {/* Main Import Tool */}
+      <div className="bg-slate-900 rounded-[48px] p-12 text-white relative overflow-hidden shadow-2xl">
+        <div className="relative z-10 max-w-2xl">
+          <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary/20 text-primary rounded-full mb-6 border border-primary/20">
+            <span className="material-symbols-outlined text-sm">auto_awesome</span>
+            <span className="text-[10px] font-black uppercase tracking-widest">AI Import Engine</span>
           </div>
+          <h2 className="text-4xl font-black mb-4 leading-tight">Paste any Amazon link to enable protection.</h2>
+          <p className="text-slate-400 mb-8 text-lg font-medium leading-relaxed">
+            Found something you like? Copy the link from Amazon and paste it here. We'll secure your payment in escrow until it arrives and you verify it.
+          </p>
           
-          <div className="flex-1 overflow-y-auto p-8 space-y-6">
-            {cart.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
-                <span className="material-symbols-outlined text-6xl">shopping_basket</span>
-                <p className="font-bold">Your cart is empty</p>
-              </div>
-            ) : (
-              cart.map((item) => (
-                <div key={item.cartId} className="flex gap-4 items-center animate-in slide-in-from-right-4">
-                  <img src={item.image} className="w-16 h-16 rounded-xl object-cover shadow-sm" alt={item.name} />
-                  <div className="flex-1">
-                    <h4 className="text-sm font-bold text-slate-800 line-clamp-1">{item.name}</h4>
-                    <p className="text-primary font-black text-xs">₹{item.price.toLocaleString()}</p>
-                  </div>
-                  <button onClick={() => removeFromCart(item.cartId)} className="material-symbols-outlined text-slate-300 hover:text-rose-500 transition-colors text-lg">delete</button>
-                </div>
-              ))
-            )}
+          <div className="flex gap-3 bg-white/10 p-3 rounded-3xl backdrop-blur-xl border border-white/10 focus-within:border-primary/50 transition-all shadow-2xl">
+            <input 
+              type="text" 
+              value={amazonLink}
+              onChange={(e) => { setAmazonLink(e.target.value); setImportError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleAmazonImport()}
+              placeholder="https://www.amazon.in/dp/..." 
+              className="bg-transparent flex-1 px-4 outline-none text-white font-medium placeholder:text-slate-500"
+            />
+            <button
+              onClick={handleAmazonImport}
+              disabled={loading}
+              className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-lg shadow-primary/20 flex items-center gap-2"
+            >
+              {loading ? <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></div> : <span className="material-symbols-outlined text-lg">bolt</span>}
+              {loading ? 'Analyzing' : 'Protect Link'}
+            </button>
           </div>
-
-          {cart.length > 0 && (
-            <div className="p-8 border-t border-slate-100 bg-slate-50 space-y-6">
-              <div className="flex justify-between items-end">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Protected Amount</p>
-                <p className="text-3xl font-black text-slate-900">₹{totalAmount.toLocaleString()}</p>
-              </div>
-              <div className="space-y-3">
-                <button 
-                  onClick={handleCheckout}
-                  disabled={loading}
-                  className="w-full py-5 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined">payments</span>
-                  {loading ? 'Initiating Checkout...' : 'Checkout with Razorpay'}
-                </button>
-                <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-widest">All items will be held in Zelcor Escrow</p>
-              </div>
-            </div>
-          )}
+          {importError && <p className="mt-4 text-rose-400 text-sm font-bold flex items-center gap-2 animate-in slide-in-from-top-2">
+            <span className="material-symbols-outlined text-sm">error</span> {importError}
+          </p>}
         </div>
+        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-primary/10 to-transparent pointer-events-none"></div>
       </div>
 
-      {/* Main Content */}
-      <main className="max-w-[1200px] mx-auto p-12 space-y-12">
-        {/* Amazon Import Section */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-12 rounded-[48px] text-white relative overflow-hidden shadow-2xl shadow-slate-200">
-          <div className="relative z-10 space-y-6 max-w-[600px]">
-             <span className="px-3 py-1 bg-primary text-white rounded-full text-[10px] font-black uppercase tracking-[0.2em]">Import from Amazon</span>
-             <h2 className="font-h1 text-5xl tracking-tight leading-none">Paste any Amazon link to buy with Escrow protection.</h2>
-             <div className="flex gap-2 bg-white/10 p-2 rounded-2xl backdrop-blur-md border border-white/10 focus-within:border-primary/50 transition-all">
-                <input 
-                  type="text" 
-                  value={amazonLink}
-                  onChange={handleAmazonLinkChange}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAmazonImport();
-                    }
-                  }}
-                  placeholder="https://www.amazon.in/dp/B0CHX2W7S4..." 
-                  className="bg-transparent flex-1 px-4 outline-none text-sm placeholder:text-slate-500"
-                />
-                <button
-                  onClick={handleAmazonImport}
-                  disabled={loading}
-                  className="px-6 py-3 bg-primary text-white rounded-xl font-bold text-xs flex items-center gap-2 disabled:opacity-60"
+      {/* Results / Empty State */}
+      <div className="min-h-[400px]">
+        {scannedProduct ? (
+          <div className="animate-in fade-in slide-in-from-bottom-8 duration-700">
+            <div className="bg-white rounded-[48px] border border-slate-100 p-12 shadow-xl flex flex-col md:flex-row gap-12 items-center">
+              <div className="w-full md:w-80 aspect-square rounded-[40px] overflow-hidden shadow-2xl bg-slate-50 border border-slate-100 group relative">
+                <img src={scannedProduct.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt={scannedProduct.name} />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+              </div>
+              
+              <div className="flex-1 space-y-8">
+                <div className="space-y-4">
+                  <span className="px-4 py-1.5 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-100">AI Verified Details</span>
+                  <h3 className="text-4xl font-black text-slate-900 leading-tight">{scannedProduct.name}</h3>
+                  <div className="flex items-center gap-4">
+                    <p className="text-5xl font-black text-primary">₹{scannedProduct.price.toLocaleString()}</p>
+                    <div className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-bold text-slate-400">MARKET PRICE</div>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-slate-50 rounded-3xl space-y-4 border border-slate-100">
+                  <div className="flex items-center gap-3 text-slate-600 font-bold text-sm">
+                    <span className="material-symbols-outlined text-emerald-500">verified_user</span>
+                    Funds held in decentralized escrow for 48h after delivery.
+                  </div>
+                  <div className="flex items-center gap-3 text-slate-600 font-bold text-sm">
+                    <span className="material-symbols-outlined text-primary">security</span>
+                    Automatic refund if product doesn't match description.
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => addToCart(scannedProduct)}
+                  className="w-full md:w-auto px-12 py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-black hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3"
                 >
-                  <span className="material-symbols-outlined text-sm">link</span>
-                  {loading ? 'Scanning...' : 'Import'}
+                  <span className="material-symbols-outlined">shopping_cart_checkout</span>
+                  Add to Protected Cart
                 </button>
-             </div>
-             {importError && (
-               <p className="text-rose-300 text-sm">{importError}</p>
-             )}
-             <p className="text-slate-400 text-sm italic">Zelcor automatically detects price and details for escrow creation.</p>
-          </div>
-          <div className="absolute top-[-50px] right-[-50px] w-96 h-96 bg-primary/20 rounded-full blur-[100px]"></div>
-        </div>
-
-        {/* Scanned Product Display */}
-        {scannedProduct && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <div className="flex flex-col md:flex-row gap-12 bg-slate-50 p-8 rounded-[40px] items-center border-2 border-primary/20">
-                <div className="w-full md:w-1/3 aspect-square bg-white rounded-[32px] overflow-hidden shadow-lg">
-                  <img 
-                    src={scannedProduct.image} 
-                    className="w-full h-full object-cover" 
-                    alt={scannedProduct.name}
-                    onError={(e) => {
-                      e.target.onerror = null;
-                      e.target.src = "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=300";
-                    }}
-                  />
-                </div>
-                <div className="flex-1 space-y-6 text-center md:text-left">
-                   <div className="space-y-2">
-                      <span className="text-primary font-black text-xs uppercase tracking-widest">Found on Amazon</span>
-                      <h3 className="font-h2 text-4xl text-slate-900">{scannedProduct.name}</h3>
-                   </div>
-                   <div className="flex items-center justify-center md:justify-start gap-4">
-                      <p className="font-black text-4xl text-slate-900">₹{scannedProduct.price.toLocaleString()}</p>
-                      <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-[10px] font-black uppercase">Verified Price</span>
-                   </div>
-                   <div className="space-y-4">
-                      <div className="flex items-center gap-3 text-slate-500 text-sm justify-center md:justify-start">
-                         <span className="material-symbols-outlined text-green-500">verified</span>
-                         Escrow protection will be applied at checkout.
-                      </div>
-                      <button 
-                        onClick={() => addToCart(scannedProduct)}
-                        className="w-full md:w-auto px-12 py-5 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-primary/30 hover:scale-105 transition-all active:scale-95 flex items-center justify-center gap-2"
-                      >
-                        <span className="material-symbols-outlined">add_shopping_cart</span>
-                        Add to Protected Cart
-                      </button>
-                   </div>
-                </div>
-             </div>
-          </div>
-        )}
-
-        {/* Marketplace Sections */}
-        <div className="space-y-12">
-           <div className="space-y-8">
-              <div className="flex justify-between items-center">
-                 <h3 className="font-h3 text-2xl text-slate-800 tracking-tight text-center md:text-left">Popular Marketplace</h3>
               </div>
-              <div className="grid md:grid-cols-4 gap-8">
-                {products.map((p) => (
-                  <div key={p.id} className="group flex flex-col">
-                    <div className="aspect-square bg-slate-50 rounded-[40px] overflow-hidden mb-4 relative border border-slate-100 group-hover:border-primary/20 transition-all">
-                      <img src={p.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={p.name} />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-all"></div>
-                      <button 
-                        onClick={() => addToCart(p)}
-                        className="absolute bottom-4 right-4 w-12 h-12 bg-white rounded-2xl shadow-xl flex items-center justify-center text-primary opacity-0 group-hover:opacity-100 transition-all hover:scale-110 active:scale-90"
-                      >
-                         <span className="material-symbols-outlined">add_shopping_cart</span>
-                      </button>
-                    </div>
-                    <div className="space-y-3 px-2">
-                      <h3 className="font-h3 text-lg leading-tight">{p.name}</h3>
-                      <div className="flex justify-between items-center">
-                        <p className="font-black text-xl">₹{p.price.toLocaleString()}</p>
-                        <button 
-                          onClick={() => addToCart(p)}
-                          className="text-[10px] font-black uppercase text-primary tracking-widest hover:underline"
-                        >Add to Cart</button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-           </div>
-        </div>
-      </main>
+            </div>
+          </div>
+        ) : cart.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6 opacity-30">
+            <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center">
+              <span className="material-symbols-outlined text-5xl">shopping_basket</span>
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-slate-900">Your bag is empty</h3>
+              <p className="font-bold">Import a link above to start shopping securely.</p>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
-      {/* Cart Backdrop */}
+      {/* Cart Drawer */}
       {showCart && (
-        <div onClick={() => setShowCart(false)} className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[90] animate-in fade-in duration-300"></div>
-      )}
-
-      {showDemoPayment && (
         <>
-          <div
-            onClick={() => setShowDemoPayment(false)}
-            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[110]"
-          ></div>
-          <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
-            <div className="w-full max-w-5xl bg-white rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden">
-              <div className="grid md:grid-cols-[320px_1fr]">
-                <div className="bg-primary text-white p-8 space-y-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">Z</div>
-                    <div>
-                      <p className="font-black text-xl tracking-tight">Razorpay Demo</p>
-                      <p className="text-xs text-white/70 uppercase tracking-[0.2em]">Hackathon Mode</p>
-                    </div>
+          <div onClick={() => setShowCart(false)} className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] animate-in fade-in duration-500"></div>
+          <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-white z-[110] shadow-2xl animate-in slide-in-from-right duration-500 flex flex-col">
+            <div className="p-10 border-b border-slate-50 flex items-center justify-between">
+              <h3 className="text-3xl font-black tracking-tight">Your Cart</h3>
+              <button onClick={() => setShowCart(false)} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center hover:bg-slate-100 transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-10 space-y-8">
+              {cart.map((item) => (
+                <div key={item.cartId} className="flex gap-6 group">
+                  <div className="w-20 h-20 rounded-2xl overflow-hidden bg-slate-50 flex-shrink-0">
+                    <img src={item.image} className="w-full h-full object-cover" alt={item.name} />
                   </div>
-                  <div className="bg-white/10 rounded-2xl p-5">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70">Protected Amount</p>
-                    <p className="text-4xl font-black mt-2">₹{totalAmount.toLocaleString()}</p>
-                  </div>
-                  <div className="text-sm text-white/80 leading-relaxed">
-                    This is a demo checkout. Click Next to simulate payment received and add this order to My Orders, where you can Confirm or Raise Complaint.
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-black text-slate-900 line-clamp-1">{item.name}</h4>
+                    <p className="text-primary font-black mt-1">₹{item.price.toLocaleString()}</p>
+                    <button onClick={() => removeFromCart(item.cartId)} className="text-[10px] font-black text-rose-500 uppercase tracking-widest mt-2 hover:underline">Remove</button>
                   </div>
                 </div>
+              ))}
+            </div>
 
-                <div className="p-8 md:p-10 space-y-6 bg-gradient-to-br from-white to-slate-50/50">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Razorpay Demo Checkout</p>
-                      <h3 className="text-3xl font-black text-slate-900 mt-2">Payment options</h3>
-                    </div>
-                    <button
-                      onClick={() => setShowDemoPayment(false)}
-                      className="material-symbols-outlined text-slate-400 hover:text-slate-900"
-                    >
-                      close
-                    </button>
-                  </div>
-
-                  <div className="flex flex-col items-center gap-4">
-                    <div className="w-full grid md:grid-cols-[1fr_320px] gap-6 items-start">
-                      <div className="w-full rounded-3xl border border-slate-100 bg-slate-50 p-6">
-                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-4">
-                          Payment options (demo)
-                        </p>
-                        <div className="space-y-3 text-sm font-bold text-slate-700">
-                          {['UPI', 'Cards', 'EMI', 'Netbanking', 'Wallet', 'Pay Later'].map((x) => (
-                            <div key={x} className="flex items-center justify-between rounded-2xl bg-white border border-slate-100 px-4 py-3 hover:border-primary/30 hover:bg-primary/5 transition-all">
-                              <span>{x}</span>
-                              <span className="material-symbols-outlined text-slate-300">chevron_right</span>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="text-xs text-slate-400 mt-4">
-                          Hackathon mode: click <span className="font-black text-slate-600">Next</span> to simulate “Payment received”.
-                        </p>
-                      </div>
-
-                      <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-100 bg-white p-4">
-                        <div className="w-full flex items-center justify-between">
-                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">UPI QR (optional)</p>
-                          <p className="text-[10px] font-bold text-slate-300">demo</p>
-                        </div>
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(demoPaymentUrl)}`}
-                          alt="Demo payment QR"
-                          className="w-[250px] h-[250px] rounded-3xl border border-slate-100 p-3 bg-white"
-                        />
-                        <p className="text-xs text-slate-400 text-center">
-                          Scanning opens the success link, but “Next” is the main demo flow.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {demoCheckoutError && (
-                    <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-500 mb-1">Checkout Error</p>
-                      <p className="text-sm text-rose-700">{demoCheckoutError}</p>
-                      <p className="text-xs text-rose-600 mt-2">
-                        For demo: ensure backend is running on <span className="font-bold">localhost:3000</span> and Supabase keys are correct.
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
-                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Callback Link</p>
-                    <p className="text-xs text-slate-600 break-all max-h-10 overflow-hidden">{demoPaymentUrl}</p>
-                  </div>
-
-                  <div className="flex flex-col md:flex-row gap-3">
-                    <button
-                      onClick={() => window.location.href = demoPaymentUrl}
-                      disabled={!demoPaymentUrl}
-                      className="flex-1 px-6 py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em]"
-                    >
-                      Next
-                    </button>
-                    <button
-                      onClick={() => setShowDemoPayment(false)}
-                      className="px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-[0.2em]"
-                    >
-                      Close
-                    </button>
-                  </div>
+            <div className="p-10 bg-slate-50 border-t border-slate-100 space-y-8">
+              <div className="flex justify-between items-end">
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Protected Amount</p>
+                  <p className="text-4xl font-black text-slate-900">₹{totalAmount.toLocaleString()}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Escrow Active</p>
                 </div>
               </div>
+              <button 
+                onClick={handleCheckout}
+                disabled={loading || cart.length === 0}
+                className="w-full py-6 bg-primary text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-primary/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+              >
+                <span className="material-symbols-outlined">lock_open</span>
+                {loading ? 'Processing...' : 'Secure Checkout'}
+              </button>
             </div>
           </div>
         </>
       )}
-    </div>
 
+      {/* Demo Payment Modal */}
+      {showDemoPayment && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-xl">
+          <div className="bg-white rounded-[48px] w-full max-w-4xl overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="grid md:grid-cols-[350px_1fr]">
+              <div className="bg-primary p-12 text-white flex flex-col justify-between">
+                <div className="space-y-6">
+                  <div className="text-4xl font-black tracking-tighter">Razorpay</div>
+                  <div className="h-px bg-white/20"></div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-white/60 mb-2">Order Total</p>
+                    <p className="text-5xl font-black">₹{totalAmount.toLocaleString()}</p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3 text-sm font-bold">
+                    <span className="material-symbols-outlined">security</span>
+                    Bank-grade Encryption
+                  </div>
+                  <p className="text-xs text-white/60 leading-relaxed italic">Demo Mode: No real money will be charged. Clicking "Complete Payment" will simulate a successful transaction.</p>
+                </div>
+              </div>
+
+              <div className="p-12 space-y-10">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-3xl font-black text-slate-900">Payment Options</h3>
+                  <button onClick={() => setShowDemoPayment(false)} className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-slate-400">close</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {['UPI / QR', 'Cards', 'Netbanking', 'Wallets'].map(method => (
+                    <div key={method} className="p-6 rounded-[24px] border border-slate-100 bg-slate-50 hover:border-primary/30 hover:bg-white transition-all cursor-pointer group">
+                      <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center text-slate-400 group-hover:text-primary transition-colors mb-4 shadow-sm">
+                        <span className="material-symbols-outlined">{method === 'UPI / QR' ? 'qr_code' : method === 'Cards' ? 'credit_card' : 'account_balance'}</span>
+                      </div>
+                      <p className="font-black text-slate-800">{method}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button 
+                    onClick={() => window.location.href = demoPaymentUrl}
+                    className="flex-1 py-5 bg-primary text-white rounded-[24px] font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-primary/30 hover:scale-[1.02] transition-all"
+                  >
+                    Complete Payment
+                  </button>
+                  <button 
+                    onClick={() => setShowDemoPayment(false)}
+                    className="px-10 py-5 bg-slate-100 text-slate-600 rounded-[24px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 
