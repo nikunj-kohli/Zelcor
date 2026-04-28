@@ -1,0 +1,38 @@
+name: zelcor_mobile
+description: Zelcor Mobile App - Trust, Encoded.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.7.0
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.7
+  get_it: ^8.0.3
+  shared_preferences: ^2.3.4
+  intl: ^0.20.1
+  url_launcher: ^6.3.1
+  image_picker: ^1.1.2
+  cached_network_image: ^3.4.1
+  flutter_secure_storage: ^9.2.3
+  walletconnect_flutter_v2: ^2.1.3
+  web3dart: ^2.7.2
+  http: ^1.2.2
+  google_fonts: ^6.2.1
+  supabase_flutter: ^2.8.3
+  shared_preferences: ^2.3.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
