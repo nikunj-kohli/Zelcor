@@ -20,17 +20,17 @@ const Landing = () => {
 
       <main>
         {/* 2. Hero Section */}
-        <section className="relative pt-24 pb-32 overflow-hidden mesh-gradient">
+        <section className="relative pt-16 sm:pt-24 pb-20 sm:pb-32 overflow-hidden mesh-gradient">
           <div className="absolute inset-0 node-pattern opacity-30 pointer-events-none"></div>
           <div className="max-w-[1200px] mx-auto px-6 relative z-10 text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 rounded-full mb-8">
               <span className="material-symbols-outlined text-primary text-sm">verified</span>
               <span className="text-xs font-bold text-primary uppercase tracking-widest">HackIndia Edition</span>
             </div>
-            <h1 className="font-h1 text-[64px] leading-[1.1] text-primary mb-8 tracking-tighter max-w-4xl mx-auto">
+            <h1 className="font-h1 text-4xl sm:text-5xl lg:text-[64px] leading-[1.1] text-primary mb-6 sm:mb-8 tracking-tight max-w-4xl mx-auto">
               Your money doesn't move <br /> until you say so.
             </h1>
-            <p className="text-xl text-on-surface-variant max-w-2xl mx-auto mb-12">
+            <p className="text-base sm:text-xl text-on-surface-variant max-w-2xl mx-auto mb-8 sm:mb-12">
               The blockchain escrow platform that flips the power dynamic. Hold payments in smart contracts until you receive what you paid for. Auto-refunds if they cheat.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -41,10 +41,10 @@ const Landing = () => {
         </section>
 
         {/* 3. Trust Bar */}
-        <section className="py-12 border-y border-slate-100 bg-white">
+        <section className="py-10 sm:py-12 border-y border-slate-100 bg-white">
           <div className="max-w-[1200px] mx-auto px-6">
             <p className="text-center text-label font-label text-slate-400 uppercase tracking-widest mb-8">Trusted by 500+ forward-thinking companies</p>
-            <div className="flex flex-wrap justify-center items-center gap-12 opacity-50 grayscale">
+            <div className="flex flex-wrap justify-center items-center gap-6 sm:gap-12 opacity-50 grayscale">
               <div className="font-black text-2xl text-slate-400">FLIPKART</div>
               <div className="font-black text-2xl text-slate-400">AMAZON</div>
               <div className="font-black text-2xl text-slate-400">POLICYBAZAAR</div>
@@ -55,25 +55,25 @@ const Landing = () => {
         </section>
 
         {/* 4. How It Works Section */}
-        <section id="how-it-works" className="py-24 bg-surface-container-low">
+        <section id="how-it-works" className="py-16 sm:py-24 bg-surface-container-low">
           <div className="max-w-[1200px] mx-auto px-6">
             <h2 className="font-h2 text-h2 text-center mb-16">The Core Mechanism</h2>
-            <div className="grid md:grid-cols-3 gap-12">
-              <div className="flex flex-col items-center text-center p-8 bg-white rounded-[32px] shadow-sm border border-slate-100">
+            <div className="grid md:grid-cols-3 gap-6 lg:gap-12">
+              <div className="flex flex-col items-center text-center p-6 sm:p-8 bg-white rounded-[24px] sm:rounded-[32px] shadow-sm border border-slate-100">
                 <div className="w-16 h-16 rounded-2xl bg-primary-container/10 flex items-center justify-center text-primary mb-6">
                   <span className="material-symbols-outlined text-4xl">payments</span>
                 </div>
                 <h3 className="font-h3 text-xl mb-4">1. Pay through Zelcor</h3>
                 <p className="text-on-surface-variant">Money leaves your account and enters a blockchain smart contract. The company doesn't get it yet.</p>
               </div>
-              <div className="flex flex-col items-center text-center p-8 bg-white rounded-[32px] shadow-sm border border-slate-100">
+              <div className="flex flex-col items-center text-center p-6 sm:p-8 bg-white rounded-[24px] sm:rounded-[32px] shadow-sm border border-slate-100">
                 <div className="w-16 h-16 rounded-2xl bg-secondary-container/10 flex items-center justify-center text-secondary mb-6">
                   <span className="material-symbols-outlined text-4xl">inventory_2</span>
                 </div>
                 <h3 className="font-h3 text-xl mb-4">2. Receive Product</h3>
                 <p className="text-on-surface-variant">You receive your product or service as usual. You have the inspection period to verify everything.</p>
               </div>
-              <div className="flex flex-col items-center text-center p-8 bg-white rounded-[32px] shadow-sm border border-slate-100">
+              <div className="flex flex-col items-center text-center p-6 sm:p-8 bg-white rounded-[24px] sm:rounded-[32px] shadow-sm border border-slate-100">
                 <div className="w-16 h-16 rounded-2xl bg-tertiary-container/10 flex items-center justify-center text-tertiary mb-6">
                   <span className="material-symbols-outlined text-4xl">done_all</span>
                 </div>
@@ -85,13 +85,13 @@ const Landing = () => {
         </section>
 
         {/* 5. Five Industries Section */}
-        <section id="industries" className="py-24">
+        <section id="industries" className="py-16 sm:py-24">
           <div className="max-w-[1200px] mx-auto px-6">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="font-h2 text-h2 mb-6">Protecting your biggest expenses</h2>
               <p className="text-on-surface-variant">Zelcor is the first to connect traditional payments to blockchain escrow for everyday purchases across these core industries.</p>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6">
               {[
                 { name: 'Insurance', icon: 'shield', hold: '2-5% Security Bond' },
                 { name: 'Ecommerce', icon: 'shopping_cart', hold: '100% Escrow' },
@@ -99,7 +99,7 @@ const Landing = () => {
                 { name: 'Edtech', icon: 'school', hold: '100% Escrow' },
                 { name: 'Hospitals', icon: 'medical_services', hold: '30% Package Amount' }
               ].map((ind) => (
-                <div key={ind.name} className="p-8 rounded-[32px] bg-white border border-slate-100 hover:border-primary hover:shadow-xl transition-all cursor-pointer group text-center">
+                <div key={ind.name} className="p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] bg-white border border-slate-100 hover:border-primary hover:shadow-xl transition-all cursor-pointer group text-center">
                   <span className="material-symbols-outlined text-4xl text-slate-400 group-hover:text-primary mb-4 transition-colors">{ind.icon}</span>
                   <h4 className="font-h3 text-lg mb-2">{ind.name}</h4>
                   <p className="text-[10px] font-bold text-primary uppercase tracking-widest">{ind.hold}</p>
@@ -110,10 +110,10 @@ const Landing = () => {
         </section>
 
         {/* 6. Why Zelcor Section */}
-        <section className="py-24 bg-primary text-on-primary rounded-[64px] mx-6 mb-24">
+        <section className="py-16 sm:py-24 bg-primary text-on-primary rounded-[28px] sm:rounded-[64px] mx-4 sm:mx-6 mb-16 sm:mb-24">
           <div className="max-w-[1200px] mx-auto px-6">
             <h2 className="font-h2 text-h2 text-white text-center mb-16">The Blockchain Advantage</h2>
-            <div className="grid md:grid-cols-3 gap-12">
+            <div className="grid md:grid-cols-3 gap-8 lg:gap-12">
               <div className="space-y-4">
                 <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
                   <span className="material-symbols-outlined text-white">no_accounts</span>
@@ -140,16 +140,16 @@ const Landing = () => {
         </section>
 
         {/* 7. Testimonials Section */}
-        <section className="py-24">
+        <section className="py-16 sm:py-24">
           <div className="max-w-[1200px] mx-auto px-6">
             <h2 className="font-h2 text-h2 text-center mb-16">Real stories from the frontlines</h2>
-            <div className="grid md:grid-cols-3 gap-8">
+            <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
               {[
                 { quote: "Got my 15,000 rupee refund in 3 days after the insurance company ignored my claim. The auto-refund is a lifesaver.", author: "Rajesh K., Mumbai" },
                 { quote: "Landlord tried to keep my full security deposit for 'paint chips'. I showed the Zelcor blockchain proof from move-in and got it back instantly.", author: "Priya S., Bangalore" },
                 { quote: "Ordered a phone that arrived cracked. Filed a complaint, AI validated it, and money was back in my UPI wallet in a week.", author: "Arjun M., Delhi" }
               ].map((t, i) => (
-                <div key={i} className="p-8 bg-surface-container-lowest rounded-[32px] border border-slate-100 shadow-sm italic">
+                <div key={i} className="p-6 sm:p-8 bg-surface-container-lowest rounded-[24px] sm:rounded-[32px] border border-slate-100 shadow-sm italic">
                   <p className="text-lg mb-6">"{t.quote}"</p>
                   <p className="font-bold text-sm not-italic">— {t.author}</p>
                 </div>
@@ -160,7 +160,7 @@ const Landing = () => {
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-white py-24">
+      <footer className="bg-slate-900 text-white py-16 sm:py-24">
         <div className="max-w-[1200px] mx-auto px-6 grid md:grid-cols-4 gap-12">
           <div>
             <div className="text-2xl font-black tracking-tighter text-white mb-6">zelcor</div>

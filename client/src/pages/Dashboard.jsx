@@ -101,7 +101,7 @@ const Dashboard = () => {
   };
 
   return (
-    <div className="bg-[#f8f9fc] text-[#191c1e] min-h-screen font-body-lg flex">
+    <div className="bg-[#f8f9fc] text-[#191c1e] min-h-screen font-body-lg flex flex-col lg:flex-row">
       <aside className="w-64 bg-white border-r border-slate-100 hidden lg:flex flex-col h-screen sticky top-0">
         <div className="p-8">
           <div className="text-3xl font-black tracking-tighter text-primary">zelcor</div>
@@ -138,14 +138,14 @@ const Dashboard = () => {
       </aside>
 
       <div className="flex-1 flex flex-col">
-        <header className="sticky top-0 w-full z-40 bg-white/90 backdrop-blur-md border-b border-slate-100 h-20 flex justify-between items-center px-10 shadow-sm">
+        <header className="sticky top-0 w-full z-40 bg-white/90 backdrop-blur-md border-b border-slate-100 min-h-20 flex flex-wrap justify-between items-center gap-4 px-4 py-4 sm:px-6 lg:px-10 shadow-sm">
           <div className="lg:hidden text-2xl font-black tracking-tighter text-primary">zelcor</div>
           <div className="hidden lg:block text-slate-400 font-bold text-sm tracking-tight uppercase tracking-[0.2em]">Trust, Encoded.</div>
           
-          <div className="flex items-center gap-8">
+          <div className="flex flex-wrap items-center justify-end gap-3 sm:gap-6 lg:gap-8">
             <div 
               onClick={connectWallet}
-              className="flex items-center gap-3 bg-slate-50 px-4 py-2 rounded-2xl border border-slate-100 cursor-pointer hover:shadow-sm transition-all group"
+              className="flex min-w-0 items-center gap-3 bg-slate-50 px-3 py-2 sm:px-4 rounded-2xl border border-slate-100 cursor-pointer hover:shadow-sm transition-all group"
             >
               <span className={`material-symbols-outlined text-xl transition-colors ${ethAddress ? 'text-emerald-500' : 'text-primary group-hover:animate-bounce'}`}>
                 {ethAddress ? 'account_balance_wallet' : 'link'}
@@ -160,7 +160,7 @@ const Dashboard = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-4 border-l border-slate-200 pl-8">
+            <div className="flex items-center gap-3 sm:gap-4 sm:border-l border-slate-200 sm:pl-6 lg:pl-8">
               <button className="material-symbols-outlined text-slate-400 hover:text-primary transition-colors">notifications</button>
               <div onClick={() => navigate('/profile')} className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary font-bold shadow-inner cursor-pointer hover:scale-105 transition-all">
                 {profile?.full_name?.charAt(0) || 'U'}
@@ -169,18 +169,18 @@ const Dashboard = () => {
           </div>
         </header>
 
-        <main className="flex-1 p-10 pt-12 space-y-12 max-w-[1400px] mx-auto w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:p-10 lg:pt-12 space-y-8 lg:space-y-12 max-w-[1400px] mx-auto w-full">
           <section className="flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
-              <h2 className="font-h1 text-[44px] tracking-tight leading-tight mb-2">Welcome back, <span className="text-primary font-black">{profile?.full_name?.split(' ')[0]}</span></h2>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 text-slate-400">
+              <h2 className="font-h1 text-3xl sm:text-[44px] tracking-tight leading-tight mb-2">Welcome back, <span className="text-primary font-black">{profile?.full_name?.split(' ')[0] || 'User'}</span></h2>
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                <div className="flex min-w-0 items-center gap-2 text-slate-400">
                   <span className="material-symbols-outlined text-sm text-emerald-500">verified_user</span>
-                  <span className="text-[11px] font-bold uppercase tracking-widest">
+                  <span className="text-[11px] font-bold uppercase tracking-widest break-all">
                     Verified Identity: {profile?.email}
                   </span>
                 </div>
-                <div className="w-1 h-1 bg-slate-200 rounded-full"></div>
+                <div className="hidden sm:block w-1 h-1 bg-slate-200 rounded-full"></div>
                 <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 rounded-full border border-amber-100">
                   <span className="material-symbols-outlined text-amber-500 text-sm">stars</span>
                   <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">Gold Protector</span>
@@ -202,24 +202,24 @@ const Dashboard = () => {
             </div>
           </section>
 
-          <section className="grid md:grid-cols-4 gap-6">
+          <section className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
             <StatCard label="Protected Volume" val={`₹${stats.volume.toLocaleString()}`} desc="Live assurance active" icon="shield" color="primary" />
             <StatCard label="My Orders" val={stats.activeCount} desc="Awaiting confirmation" icon="shopping_bag" color="secondary" />
             <StatCard label="Refunded Total" val={`₹${stats.refundedTotal.toLocaleString()}`} desc="Money recovered" icon="undo" color="coral" />
             <StatCard label="Resolution Rate" val="100%" desc="Success guarantee" icon="check_circle" color="mint" />
           </section>
 
-          <div className="grid lg:grid-cols-12 gap-10">
-            <div className="lg:col-span-8 space-y-10">
+          <div className="grid lg:grid-cols-12 gap-6 lg:gap-10">
+            <div className="lg:col-span-8 space-y-8 lg:space-y-10 min-w-0">
               <div className="space-y-6" id="orders">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-wrap justify-between items-center gap-3">
                   <h3 className="font-h2 text-2xl text-slate-800 tracking-tight">My Orders <span className="text-slate-300 ml-2">{stats.activeCount}</span></h3>
                   <button className="text-xs font-bold text-primary hover:underline">View All</button>
                 </div>
                 
                 <div className="space-y-4">
                   {escrows.filter(e => e.status === 'active' || e.status === 'disputed').length === 0 ? (
-                    <div className="p-20 text-center bg-white rounded-[40px] border border-dashed border-slate-200 flex flex-col items-center space-y-4">
+                    <div className="p-8 sm:p-12 lg:p-20 text-center bg-white rounded-[28px] sm:rounded-[40px] border border-dashed border-slate-200 flex flex-col items-center space-y-4">
                       <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center text-slate-300">
                         <span className="material-symbols-outlined text-4xl">shield_moon</span>
                       </div>
@@ -257,11 +257,11 @@ const Dashboard = () => {
             </div>
 
             <div className="lg:col-span-4 space-y-10">
-              <div className="bg-white rounded-[40px] border border-slate-100 p-8 shadow-sm space-y-8">
+              <div className="bg-white rounded-[28px] sm:rounded-[40px] border border-slate-100 p-5 sm:p-8 shadow-sm space-y-8">
                 <h4 className="font-h2 text-xl tracking-tight">Recent Activity</h4>
                 <div className="space-y-8">
                   {activities.map((act, i) => (
-                    <div key={i} className="flex gap-4 group cursor-pointer">
+                    <div key={i} className="flex gap-4 group cursor-pointer min-w-0">
                       <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                         act.type === 'refund' ? 'bg-emerald-50 text-emerald-500' : 
                         act.type === 'dispute' ? 'bg-rose-50 text-rose-500' : 'bg-blue-50 text-blue-500'
@@ -269,7 +269,7 @@ const Dashboard = () => {
                         <span className="material-symbols-outlined text-xl">{act.icon}</span>
                       </div>
                       <div className="flex-1 border-b border-slate-50 pb-4 group-last:border-0">
-                        <div className="flex justify-between items-start mb-1">
+                        <div className="flex flex-wrap justify-between items-start gap-2 mb-1">
                           <p className="text-sm font-bold text-slate-800 leading-tight">{act.message}</p>
                           <p className="text-sm font-black text-slate-700">{act.amount}</p>
                         </div>
@@ -281,7 +281,7 @@ const Dashboard = () => {
                 <button className="w-full py-4 text-[10px] font-black text-primary uppercase tracking-[0.3em] hover:bg-slate-50 rounded-2xl transition-all">Full Activity Log</button>
               </div>
 
-              <div className="bg-[#1A5F7A] p-8 rounded-[40px] text-white space-y-6 shadow-2xl shadow-primary/30 relative overflow-hidden group">
+              <div className="bg-[#1A5F7A] p-6 sm:p-8 rounded-[28px] sm:rounded-[40px] text-white space-y-6 shadow-2xl shadow-primary/30 relative overflow-hidden group">
                 <div className="absolute top-[-20px] right-[-20px] w-32 h-32 bg-white/10 rounded-full blur-3xl"></div>
                 <div className="relative z-10 space-y-6">
                   <div className="flex justify-between items-start">
@@ -370,14 +370,14 @@ const EscrowCard = ({ item, onConfirm, onReport }) => {
   const expiryTime = item.auto_release_at || item.created_at;
   const timeLeft = expiryTime ? Math.max(0, Math.round((new Date(expiryTime) - new Date()) / 3600000)) : 48;
   return (
-    <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-8 group hover:shadow-xl hover:shadow-slate-100 transition-all">
-      <div className="flex items-center gap-6">
+    <div className="bg-white p-5 sm:p-8 rounded-[28px] sm:rounded-[40px] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8 group hover:shadow-xl hover:shadow-slate-100 transition-all">
+      <div className="flex min-w-0 items-center gap-4 sm:gap-6">
         <div className="w-16 h-16 rounded-3xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-primary/5 group-hover:text-primary transition-all">
           <span className="material-symbols-outlined text-3xl">shopping_bag</span>
         </div>
-        <div>
+        <div className="min-w-0">
           <h4 className="font-h2 text-xl mb-1 text-slate-800 tracking-tight">{item.item_name}</h4>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border ${
               item.status === 'disputed' ? 'bg-rose-50 text-rose-500 border-rose-100' : 'bg-emerald-50 text-emerald-500 border-emerald-100'
             }`}>
@@ -388,16 +388,16 @@ const EscrowCard = ({ item, onConfirm, onReport }) => {
         </div>
       </div>
       
-      <div className="flex items-center gap-10">
-        <div className="text-right">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8 lg:gap-10">
+        <div className="text-left sm:text-right">
           <p className="text-xl font-black text-slate-700 leading-none mb-2">₹{item.amount.toLocaleString()}</p>
-          <div className="flex items-center justify-end gap-1.5 text-orange-500">
+          <div className="flex items-center sm:justify-end gap-1.5 text-orange-500">
             <span className="material-symbols-outlined text-sm">schedule</span>
             <span className="text-[10px] font-bold uppercase tracking-widest">{timeLeft}h remaining</span>
           </div>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {item.status === 'active' && (
             <button
               onClick={onConfirm}

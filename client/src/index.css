@@ -7,9 +7,9 @@
   line-height: 1.5;
   font-weight: 400;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  color-scheme: light;
+  color: #191c1e;
+  background-color: #f8f9fc;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -17,10 +17,50 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  overflow-x: hidden;
+  background: #f8f9fc;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
+  background: #f8f9fc;
+  color: #191c1e;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  min-width: 0;
+}
+
+button {
+  color: inherit;
+}
+
+.material-symbols-outlined {
+  line-height: 1;
 }
 
 @layer components {
@@ -39,5 +79,15 @@ body {
   .modal-overlay {
     background-color: rgba(25, 28, 30, 0.6);
     backdrop-filter: blur(4px);
+  }
+}
+
+@media (max-width: 640px) {
+  body {
+    font-size: 15px;
+  }
+
+  .material-symbols-outlined {
+    flex-shrink: 0;
   }
 }
