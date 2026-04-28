@@ -481,8 +481,8 @@ const ZelcorShop = () => {
             className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[110]"
           ></div>
           <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
-            <div className="w-full max-w-3xl bg-white rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden">
-              <div className="grid md:grid-cols-[280px_1fr]">
+            <div className="w-full max-w-5xl bg-white rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden">
+              <div className="grid md:grid-cols-[320px_1fr]">
                 <div className="bg-primary text-white p-8 space-y-6">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">Z</div>
@@ -500,7 +500,7 @@ const ZelcorShop = () => {
                   </div>
                 </div>
 
-                <div className="p-8 md:p-10 space-y-6">
+                <div className="p-8 md:p-10 space-y-6 bg-gradient-to-br from-white to-slate-50/50">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Razorpay Demo Checkout</p>
@@ -515,14 +515,14 @@ const ZelcorShop = () => {
                   </div>
 
                   <div className="flex flex-col items-center gap-4">
-                    <div className="w-full grid md:grid-cols-[1fr_300px] gap-6 items-start">
+                    <div className="w-full grid md:grid-cols-[1fr_320px] gap-6 items-start">
                       <div className="w-full rounded-3xl border border-slate-100 bg-slate-50 p-6">
                         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-4">
                           Payment options (demo)
                         </p>
                         <div className="space-y-3 text-sm font-bold text-slate-700">
                           {['UPI', 'Cards', 'EMI', 'Netbanking', 'Wallet', 'Pay Later'].map((x) => (
-                            <div key={x} className="flex items-center justify-between rounded-2xl bg-white border border-slate-100 px-4 py-3">
+                            <div key={x} className="flex items-center justify-between rounded-2xl bg-white border border-slate-100 px-4 py-3 hover:border-primary/30 hover:bg-primary/5 transition-all">
                               <span>{x}</span>
                               <span className="material-symbols-outlined text-slate-300">chevron_right</span>
                             </div>
@@ -533,7 +533,7 @@ const ZelcorShop = () => {
                         </p>
                       </div>
 
-                      <div className="flex flex-col items-center gap-3">
+                      <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-100 bg-white p-4">
                         <div className="w-full flex items-center justify-between">
                           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">UPI QR (optional)</p>
                           <p className="text-[10px] font-bold text-slate-300">demo</p>
@@ -541,7 +541,7 @@ const ZelcorShop = () => {
                         <img
                           src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(demoPaymentUrl)}`}
                           alt="Demo payment QR"
-                          className="w-[260px] h-[260px] rounded-3xl border border-slate-100 p-3 bg-white"
+                          className="w-[250px] h-[250px] rounded-3xl border border-slate-100 p-3 bg-white"
                         />
                         <p className="text-xs text-slate-400 text-center">
                           Scanning opens the success link, but “Next” is the main demo flow.
@@ -562,7 +562,7 @@ const ZelcorShop = () => {
 
                   <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Callback Link</p>
-                    <p className="text-xs text-slate-600 break-all">{demoPaymentUrl}</p>
+                    <p className="text-xs text-slate-600 break-all max-h-10 overflow-hidden">{demoPaymentUrl}</p>
                   </div>
 
                   <div className="flex flex-col md:flex-row gap-3">
