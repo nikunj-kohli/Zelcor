@@ -222,10 +222,10 @@ const Insurance = () => {
                 <p className="text-slate-500 font-medium text-sm leading-relaxed mb-8 flex-1">{policy.description}</p>
                 
                 <div className="space-y-3 mb-8">
-                  {policy.terms?.slice(0, 2).map((f, i) => (
+                  {(Array.isArray(policy.terms) ? policy.terms : (policy.terms?.split(',') || [])).slice(0, 2).map((f, i) => (
                     <div key={i} className="flex items-center gap-2 text-[10px] font-black text-slate-600 uppercase tracking-widest">
                       <span className="material-symbols-outlined text-emerald-500 text-sm">verified</span>
-                      {f}
+                      {f.replace(/[{}" ]/g, '')}
                     </div>
                   ))}
                 </div>
