@@ -277,32 +277,24 @@ const ZelcorShop = () => {
   };
 
   return (
-    <div className="bg-white min-h-screen font-body-lg relative overflow-x-hidden">
-      {/* Header */}
-      <header className="h-20 border-b border-slate-100 flex items-center justify-between px-10 sticky top-0 bg-white/90 backdrop-blur-md z-50">
-        <div className="flex items-center gap-10">
-          <div className="text-2xl font-black tracking-tighter text-slate-900 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
-            <span className="material-symbols-outlined text-primary">verified_user</span>
-            Zelcor Shop
-          </div>
-          <nav className="hidden md:flex gap-8 text-sm font-bold text-slate-400">
-            <span className="text-slate-900">Marketplace</span>
-            <span>Amazon Import</span>
-            <span>Protection Plans</span>
-          </nav>
-        </div>
-        <div className="flex items-center gap-6">
-           <button onClick={() => setShowCart(true)} className="relative p-2 hover:bg-slate-50 rounded-xl transition-all">
-              <span className="material-symbols-outlined text-slate-600">shopping_cart</span>
-              {cart.length > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-primary text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-white">
-                  {cart.length}
-                </span>
-              )}
-           </button>
-           <button onClick={() => navigate('/dashboard')} className="px-4 py-2 bg-primary/10 text-primary rounded-xl font-bold text-xs hover:bg-primary/20 transition-all">Back to Dashboard</button>
-        </div>
-      </header>
+    <div className="space-y-8">
+      {/* Marketplace Nav */}
+      <div className="flex items-center justify-between">
+        <nav className="flex gap-8 text-sm font-bold text-slate-400">
+          <span className="text-slate-900 border-b-2 border-primary pb-1">Marketplace</span>
+          <span className="hover:text-slate-600 cursor-pointer">Amazon Import</span>
+          <span className="hover:text-slate-600 cursor-pointer">Protection Plans</span>
+        </nav>
+        <button onClick={() => setShowCart(true)} className="relative p-3 bg-white border border-slate-100 rounded-2xl shadow-sm hover:bg-slate-50 transition-all flex items-center gap-3">
+          <span className="material-symbols-outlined text-primary">shopping_cart</span>
+          <span className="text-xs font-black uppercase tracking-widest text-slate-700">My Cart</span>
+          {cart.length > 0 && (
+            <span className="bg-primary text-white text-[10px] px-2 py-0.5 rounded-full font-black">
+              {cart.length}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Cart Sidebar */}
       <div className={`fixed inset-y-0 right-0 w-full md:w-96 bg-white shadow-2xl z-[100] transition-transform duration-500 transform ${showCart ? 'translate-x-0' : 'translate-x-full'}`}>
@@ -586,14 +578,8 @@ const ZelcorShop = () => {
           </div>
         </>
       )}
-
-      <footer className="p-12 text-center border-t border-slate-50 mt-20">
-        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-relaxed">
-          Zelcor Escrow Protocol v2.4 <br /> 
-          <span className="text-primary/50">Trust, Encoded.</span>
-        </p>
-      </footer>
     </div>
+
   );
 };
 

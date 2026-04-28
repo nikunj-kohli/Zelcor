@@ -93,23 +93,18 @@ const Insurance = () => {
   }
 
   return (
-    <div className="bg-[#f8f9fc] min-h-screen">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-100">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-black text-[#191c1e]">Health Insurance</h1>
-              <p className="text-slate-500 mt-1">File claims, track urgency, get instant approvals</p>
-            </div>
-            <button
-              onClick={() => setShowFileClaim(true)}
-              className="bg-primary text-white px-6 py-3 rounded-xl font-bold hover:bg-primary/90 transition"
-            >
-              + File New Claim
-            </button>
-          </div>
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-black text-[#191c1e] tracking-tight">Insurance Claims</h1>
+          <p className="text-slate-500 mt-1">File claims, track urgency, and get AI-verified instant approvals.</p>
         </div>
+        <button
+          onClick={() => setShowFileClaim(true)}
+          className="bg-primary text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] transition-all active:scale-[0.98]"
+        >
+          + File New Claim
+        </button>
       </div>
 
       {/* Stats */}

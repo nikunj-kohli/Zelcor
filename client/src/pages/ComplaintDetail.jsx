@@ -26,6 +26,12 @@ const ComplaintDetail = () => {
 
   if (loading) return <div className="flex items-center justify-center min-h-screen font-black text-primary animate-pulse">LOADING CASE</div>;
   if (!dispute) return <div className="p-12 text-center font-bold">Case not found</div>;
+  let parsedSummary = null;
+  try {
+    parsedSummary = dispute.ai_analysis_summary ? JSON.parse(dispute.ai_analysis_summary) : null;
+  } catch {
+    parsedSummary = null;
+  }
 
   return (
     <div className="bg-[#f8f9fc] min-h-screen font-body-lg text-on-surface pb-24">
@@ -78,7 +84,11 @@ const ComplaintDetail = () => {
                 <div className="grid grid-cols-2 gap-4">
                   {dispute.evidence.map((ev, i) => (
                     <div key={i} className="aspect-video rounded-3xl overflow-hidden border border-slate-100">
-                      <img className="w-full h-full object-cover" src={ev.file_url} />
+                      {ev.file_type === 'video' ? (
+                        <video className="w-full h-full object-cover" src={ev.file_url} controls />
+                      ) : (
+                        <img className="w-full h-full object-cover" src={ev.file_url} alt="evidence" />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -93,8 +103,22 @@ const ComplaintDetail = () => {
                 <h4 className="font-h3 text-xl">Zelcor AI Analysis</h4>
               </div>
               <p className="text-on-surface-variant leading-relaxed italic">
-                Analysis suggests a validity score of {(dispute.ai_probability_legit * 100).toFixed(1)}%. Suggested Action: {dispute.ai_analysis_summary || 'Under Review'}.
+                Analysis suggests a validity score of {(dispute.ai_probability_legit * 100).toFixed(1)}%. Suggested Action: {parsedSummary?.suggested_action || dispute.ai_analysis_summary || 'Under Review'}.
               </p>
+              {parsedSummary?.media_analysis && (
+                <div className="text-xs text-slate-600 bg-white rounded-2xl p-4 border border-slate-100 space-y-1">
+                  <p className="font-bold uppercase tracking-widest text-slate-400">Media Security</p>
+                  <p>Captured in app: {parsedSummary.media_analysis.captureIntegrity?.capturedInApp ?? 0}</p>
+                  <p>Gallery uploads: {parsedSummary.media_analysis.captureIntegrity?.uploadedFromGallery ?? 0}</p>
+                </div>
+              )}
+              {parsedSummary?.auto_resolution && (
+                <div className="text-xs text-slate-700 bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+                  {parsedSummary.auto_resolution === 'refund_initiated'
+                    ? 'Product marked as returned. Refund initiated to your primary bank account.'
+                    : 'Complaint is under AI and smart-contract review.'}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ extended: true, limit: "100mb" }));
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";
@@ -36,6 +37,11 @@ const aiBaseUrl = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 
 const AI_MODEL = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test-key')
   ? (process.env.OPENAI_MODEL || "gpt-4o-mini")
   : (process.env.GROQ_MODEL || "llama-3.1-8b-instant");
+const ROBOFLOW_API_KEY = process.env.ROBOFLOW_API_KEY || "";
+const ROBOFLOW_DAMAGE_ENDPOINT = process.env.ROBOFLOW_DAMAGE_ENDPOINT || "";
+const HUGGINGFACE_API_KEY = process.env.HUGGINGFACE_API_KEY || "";
+const HUGGINGFACE_IMAGE_MODEL = process.env.HUGGINGFACE_IMAGE_MODEL || "";
+const HUGGINGFACE_VIDEO_MODEL = process.env.HUGGINGFACE_VIDEO_MODEL || "";
 
 const openai = new OpenAI({
   apiKey: aiApiKey,
@@ -445,17 +451,147 @@ app.post("/api/shop/analyze-link", async (req, res) => {
 });
 
 // Helper: Classify complaint using OpenAI
-async function classifyComplaint(description, images) {
+async function analyzeDamageWithRoboflow(mediaUrl) {
+  if (!ROBOFLOW_API_KEY || !ROBOFLOW_DAMAGE_ENDPOINT || !mediaUrl) {
+    return { provider: "roboflow", skipped: true, reason: "missing-config-or-media" };
+  }
+
+  try {
+    const endpoint = `${ROBOFLOW_DAMAGE_ENDPOINT}?api_key=${encodeURIComponent(ROBOFLOW_API_KEY)}&image=${encodeURIComponent(mediaUrl)}`;
+    const response = await axios.post(endpoint, null, { timeout: 15000 });
+    return {
+      provider: "roboflow",
+      skipped: false,
+      topPrediction: response.data?.predictions?.[0] || null,
+      predictionsCount: response.data?.predictions?.length || 0,
+      raw: response.data,
+    };
+  } catch (error) {
+    return {
+      provider: "roboflow",
+      skipped: true,
+      reason: "request-failed",
+      error: error?.response?.data || error.message,
+    };
+  }
+}
+
+async function analyzeSyntheticMediaWithHuggingFace(modelId, mediaUrl) {
+  if (!HUGGINGFACE_API_KEY || !modelId || !mediaUrl) {
+    return { provider: "huggingface", skipped: true, reason: "missing-config-or-media", modelId };
+  }
+
+  try {
+    // URL payload allows hackathon-friendly inference without binary uploads.
+    const response = await axios.post(
+      `https://api-inference.huggingface.co/models/${modelId}`,
+      { inputs: mediaUrl },
+      {
+        timeout: 20000,
+        headers: {
+          Authorization: `Bearer ${HUGGINGFACE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    return {
+      provider: "huggingface",
+      skipped: false,
+      modelId,
+      output: response.data,
+    };
+  } catch (error) {
+    return {
+      provider: "huggingface",
+      skipped: true,
+      modelId,
+      reason: "request-failed",
+      error: error?.response?.data || error.message,
+    };
+  }
+}
+
+async function ensureEvidenceUrls(evidenceItems = []) {
+  const uploads = evidenceItems.map(async (item) => {
+    if (!item?.url) return null;
+    if (!String(item.url).startsWith("data:")) return item;
+
+    const uploadResult = await cloudinary.uploader.upload(item.url, {
+      folder: "zelcor/complaints",
+      resource_type: item.type === "video" ? "video" : "image",
+    });
+
+    return {
+      ...item,
+      url: uploadResult.secure_url,
+    };
+  });
+
+  const resolved = await Promise.all(uploads);
+  return resolved.filter(Boolean);
+}
+
+async function analyzeEvidenceMedia(evidenceItems = []) {
+  const firstImage = evidenceItems.find((x) => x?.type === "image" && x?.url)?.url || "";
+  const firstVideo = evidenceItems.find((x) => x?.type === "video" && x?.url)?.url || "";
+  const anyMediaUrl = firstImage || firstVideo || evidenceItems.find((x) => x?.url)?.url || "";
+
+  const [damage, imageSynthetic, videoSynthetic] = await Promise.all([
+    analyzeDamageWithRoboflow(anyMediaUrl),
+    analyzeSyntheticMediaWithHuggingFace(HUGGINGFACE_IMAGE_MODEL, firstImage || anyMediaUrl),
+    analyzeSyntheticMediaWithHuggingFace(HUGGINGFACE_VIDEO_MODEL, firstVideo || anyMediaUrl),
+  ]);
+
+  return {
+    evidenceCount: evidenceItems.length,
+    hasImage: Boolean(firstImage),
+    hasVideo: Boolean(firstVideo),
+    captureIntegrity: {
+      total: evidenceItems.length,
+      capturedInApp: evidenceItems.filter((x) => x?.captured_in_app).length,
+      uploadedFromGallery: evidenceItems.filter((x) => x && x.captured_in_app === false).length,
+    },
+    modelRuns: {
+      damage,
+      imageSynthetic,
+      videoSynthetic,
+    },
+  };
+}
+
+const complaintCategoryToUint = {
+  wrong_product: 0,
+  damaged: 1,
+  missing: 2,
+  not_as_described: 3,
+  counterfeit: 4,
+  other: 5,
+};
+
+const urgencyToUint = {
+  low: 0,
+  medium: 1,
+  high: 2,
+};
+
+async function classifyComplaint(description, mediaAnalysis) {
   const prompt = `Analyze this complaint and return JSON:
 {
   "is_valid": true/false,
   "category": "wrong_product|damaged|missing|not_as_described|counterfeit|other",
   "urgency": "low|medium|high",
   "confidence_score": 0-100,
-  "suggested_action": "refund|replace|partial|reject"
+  "suggested_action": "refund|replace|partial|reject",
+  "same_product_match": true/false,
+  "condition_summary": "short summary of product condition",
+  "key_findings": ["finding 1", "finding 2"]
 }
 
 Complaint: ${description}
+
+Model Analysis:
+${JSON.stringify(mediaAnalysis || {}, null, 2)}
 
 Return only valid JSON.`;
 
@@ -475,6 +611,9 @@ Return only valid JSON.`;
       urgency: "medium",
       confidence_score: 50,
       suggested_action: "refund",
+      same_product_match: false,
+      condition_summary: "Could not determine exact condition automatically.",
+      key_findings: ["Model fallback used due to AI classification error."],
     };
   }
 }
@@ -516,6 +655,31 @@ app.get("/api/auth/profile/:id", async (req, res) => {
   }
 });
 
+app.put("/api/auth/profile/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { full_name, wallet_address, avatar_url, is_enterprise } = req.body;
+
+    const updatePayload = {};
+    if (typeof full_name === "string") updatePayload.full_name = full_name.trim();
+    if (typeof wallet_address === "string") updatePayload.wallet_address = wallet_address.trim();
+    if (typeof avatar_url === "string") updatePayload.avatar_url = avatar_url.trim();
+    if (typeof is_enterprise === "boolean") updatePayload.is_enterprise = is_enterprise;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(updatePayload)
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, profile: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
 // ===================
 // ESCROW ROUTES
 // ===================
@@ -532,6 +696,26 @@ app.get("/api/user/escrows", async (req, res) => {
 
     if (error) throw error;
     res.json({ success: true, escrows: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/user/disputes", async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) {
+      return res.status(400).json({ success: false, error: "user_id is required" });
+    }
+
+    const { data, error } = await supabase
+      .from("disputes")
+      .select("*, escrows(*)")
+      .eq("filed_by", user_id)
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    res.json({ success: true, disputes: data || [] });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -631,10 +815,31 @@ app.post("/api/escrows/confirm", async (req, res) => {
 
 app.post("/api/disputes/file", async (req, res) => {
   try {
-    const { escrow_id, filed_by, reason, evidence_urls } = req.body;
+    const {
+      escrow_id,
+      filed_by,
+      reason,
+      complaint_type = "other",
+      evidence_urls = [],
+      evidence = [],
+    } = req.body;
+
+    const normalizedEvidence = (Array.isArray(evidence) && evidence.length > 0
+      ? evidence
+      : (Array.isArray(evidence_urls) ? evidence_urls.map((url) => ({ url, type: "image", captured_in_app: null })) : [])
+    ).filter((item) => item?.url);
+
+    const hostedEvidence = await ensureEvidenceUrls(normalizedEvidence);
+    const mediaAnalysis = await analyzeEvidenceMedia(hostedEvidence);
 
     // 1. AI Classification
-    const aiResult = await classifyComplaint(reason, evidence_urls);
+    const aiResult = await classifyComplaint(
+      `Complaint Type: ${complaint_type}\n${reason}`,
+      mediaAnalysis
+    );
+    const aiScore = Math.max(0, Math.min(100, Number(aiResult.confidence_score || 0)));
+    let complaintTxHash = "";
+    let autoResolution = "under_review";
 
     // 2. Create Dispute
     const { data: dispute, error: dError } = await supabase
@@ -643,9 +848,13 @@ app.post("/api/disputes/file", async (req, res) => {
         escrow_id,
         filed_by,
         reason,
-        ai_probability_legit: aiResult.confidence_score / 100,
-        ai_analysis_summary: aiResult.suggested_action,
-        status: aiResult.confidence_score >= 70 ? "under_review" : "pending"
+        ai_probability_legit: aiScore / 100,
+        ai_analysis_summary: JSON.stringify({
+          suggested_action: aiResult.suggested_action,
+          complaint_type,
+          media_analysis: mediaAnalysis,
+        }),
+        status: aiScore >= 70 ? "under_review" : "pending"
       }])
       .select()
       .single();
@@ -653,27 +862,77 @@ app.post("/api/disputes/file", async (req, res) => {
     if (dError) throw dError;
 
     // 3. Save Evidence
-    if (evidence_urls && evidence_urls.length > 0) {
-      const evidenceData = evidence_urls.map(url => ({
+    if (hostedEvidence.length > 0) {
+      const evidenceData = hostedEvidence.map((item) => ({
         dispute_id: dispute.id,
-        file_url: url,
-        file_type: "image"
+        file_url: item.url,
+        file_type: item.type || "image",
       }));
       await supabase.from("evidence").insert(evidenceData);
     }
 
-    // 4. Update Escrow status
-    await supabase.from("escrows").update({ status: "disputed" }).eq("id", escrow_id);
+    // 4. Trigger smart contract complaint record
+    if (process.env.CONTRACT_ADDRESS) {
+      try {
+        const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ESCROW_ABI, wallet);
+        const blockchainHash = generateBlockchainHash(
+          JSON.stringify({ escrow_id, reason, evidence: hostedEvidence.map((x) => x.url) })
+        );
+        const tx = await contract.fileComplaint(
+          escrow_id,
+          reason,
+          complaintCategoryToUint[complaint_type] ?? complaintCategoryToUint.other,
+          urgencyToUint[aiResult.urgency] ?? urgencyToUint.medium,
+          BigInt(aiScore),
+          aiScore >= 70,
+          blockchainHash
+        );
+        await tx.wait();
+        complaintTxHash = tx.hash;
+      } catch (e) {
+        console.log("Complaint smart contract call skipped");
+      }
+    }
 
-    // 5. Real-time Notification (Pusher)
+    // 5. If confidence is high and refund suggested, auto-trigger refund flow
+    let escrowStatus = "disputed";
+    let disputeStatus = aiScore >= 70 ? "under_review" : "pending";
+    if (aiResult.suggested_action === "refund" && aiScore >= 85) {
+      autoResolution = "refund_initiated";
+      escrowStatus = "refunded";
+      disputeStatus = "settled";
+      if (process.env.CONTRACT_ADDRESS) {
+        try {
+          const contract = new ethers.Contract(process.env.CONTRACT_ADDRESS, ESCROW_ABI, wallet);
+          const refundTx = await contract.approveRefund(escrow_id);
+          await refundTx.wait();
+        } catch (e) {
+          console.log("Auto refund smart contract call skipped");
+        }
+      }
+    }
+
+    await supabase.from("escrows").update({ status: escrowStatus }).eq("id", escrow_id);
+    await supabase.from("disputes").update({
+      status: disputeStatus,
+      ai_analysis_summary: JSON.stringify({
+        suggested_action: aiResult.suggested_action,
+        complaint_type,
+        media_analysis: mediaAnalysis,
+        complaint_tx_hash: complaintTxHash,
+        auto_resolution: autoResolution,
+      }),
+    }).eq("id", dispute.id);
+
+    // 6. Real-time Notification (Pusher)
     pusher.trigger("company-portal", "new-dispute", {
       dispute_id: dispute.id,
       escrow_id: escrow_id,
       reason: reason,
-      ai_score: aiResult.confidence_score
+      ai_score: aiScore
     });
 
-    // 6. Email Notification (Resend) to the Company (Seller)
+    // 7. Email Notification (Resend) to the Company (Seller)
     try {
       const { data: escrow } = await supabase
         .from("escrows")
@@ -700,7 +959,7 @@ app.post("/api/disputes/file", async (req, res) => {
                 <p>A customer has filed a dispute for an active escrow.</p>
                 <hr/>
                 <p><b>Reason:</b> ${reason}</p>
-                <p><b>AI Validity Score:</b> ${aiResult.confidence_score}%</p>
+                <p><b>AI Validity Score:</b> ${aiScore}%</p>
                 <p>Please log in to the Zelcor Enterprise Portal to respond.</p>
               </div>
             `
@@ -710,7 +969,20 @@ app.post("/api/disputes/file", async (req, res) => {
     } catch (e) { console.log("Email failed", e); }
 
 
-    res.json({ success: true, dispute, aiResult });
+    res.json({
+      success: true,
+      dispute: { ...dispute, status: disputeStatus },
+      aiResult,
+      mediaAnalysis,
+      smartContract: {
+        complaint_logged: Boolean(complaintTxHash),
+        complaint_tx_hash: complaintTxHash || null,
+        auto_resolution: autoResolution,
+        customer_message: autoResolution === "refund_initiated"
+          ? "Product marked as returned. Refund initiated to your primary bank account."
+          : "Complaint submitted. Evidence is under AI and smart-contract review.",
+      },
+    });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }

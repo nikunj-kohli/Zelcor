@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS escrows (
   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'completed', 'disputed', 'refunded', 'inspection')),
   blockchain_tx_hash TEXT,
   razorpay_order_id TEXT,
+  auto_release_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
@@ -116,6 +117,9 @@ CREATE TABLE IF NOT EXISTS evidence (
   file_type TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Safe migration helpers for already-created tables
+ALTER TABLE escrows ADD COLUMN IF NOT EXISTS auto_release_at TIMESTAMP WITH TIME ZONE;
 
 -- Enable RLS on all tables
 ALTER TABLE insurance_claims ENABLE ROW LEVEL SECURITY;

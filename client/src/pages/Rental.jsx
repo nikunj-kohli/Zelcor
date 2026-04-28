@@ -118,23 +118,18 @@ const Rental = () => {
   }
 
   return (
-    <div className="bg-[#f8f9fc] min-h-screen">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-100">
-        <div className="max-w-6xl mx-auto px-6 py-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-black text-[#191c1e]">Rental Deposits</h1>
-              <p className="text-slate-500 mt-1">Protect your security deposit with blockchain proof</p>
-            </div>
-            <button
-              onClick={() => setShowNewAgreement(true)}
-              className="bg-primary text-white px-6 py-3 rounded-xl font-bold hover:bg-primary/90 transition"
-            >
-              + New Agreement
-            </button>
-          </div>
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-4xl font-black text-[#191c1e] tracking-tight">Rental Protection</h1>
+          <p className="text-slate-500 mt-1">Protect your security deposit with blockchain-verified move-in proof.</p>
         </div>
+        <button
+          onClick={() => setShowNewAgreement(true)}
+          className="bg-primary text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] transition-all active:scale-[0.98]"
+        >
+          + New Agreement
+        </button>
       </div>
 
       {/* How It Works */}

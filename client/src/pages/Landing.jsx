@@ -84,20 +84,18 @@ const Landing = () => {
           </div>
         </section>
 
-        {/* 5. Five Industries Section */}
+        {/* 5. Three Industries Section */}
         <section id="industries" className="py-24">
           <div className="max-w-[1200px] mx-auto px-6">
             <div className="text-center max-w-3xl mx-auto mb-16">
               <h2 className="font-h2 text-h2 mb-6">Protecting your biggest expenses</h2>
               <p className="text-on-surface-variant">Zelcor is the first to connect traditional payments to blockchain escrow for everyday purchases across these core industries.</p>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { name: 'Insurance', icon: 'shield', hold: '2-5% Security Bond' },
                 { name: 'Ecommerce', icon: 'shopping_cart', hold: '100% Escrow' },
-                { name: 'Rentals', icon: 'apartment', hold: '50% Security Deposit' },
-                { name: 'Edtech', icon: 'school', hold: '100% Escrow' },
-                { name: 'Hospitals', icon: 'medical_services', hold: '30% Package Amount' }
+                { name: 'Rentals', icon: 'apartment', hold: '50% Security Deposit' }
               ].map((ind) => (
                 <div key={ind.name} className="p-8 rounded-[32px] bg-white border border-slate-100 hover:border-primary hover:shadow-xl transition-all cursor-pointer group text-center">
                   <span className="material-symbols-outlined text-4xl text-slate-400 group-hover:text-primary mb-4 transition-colors">{ind.icon}</span>
