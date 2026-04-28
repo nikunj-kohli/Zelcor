@@ -3,6 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import axios from "axios";
+import * as cheerio from "cheerio";
 import { ethers } from "ethers";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
@@ -30,6 +32,10 @@ const aiApiKey = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== '
 const aiBaseUrl = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test-key')
   ? undefined
   : "https://api.groq.com/openai/v1";
+
+const AI_MODEL = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test-key')
+  ? (process.env.OPENAI_MODEL || "gpt-4o-mini")
+  : (process.env.GROQ_MODEL || "llama-3.1-8b-instant");
 
 const openai = new OpenAI({
   apiKey: aiApiKey,
@@ -87,6 +93,234 @@ function generateBlockchainHash(data) {
   return "0x" + crypto.createHash("sha256").update(data).digest("hex");
 }
 
+async function getProfileById(profileId) {
+  if (!profileId) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, is_enterprise")
+    .eq("id", profileId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function resolveSellerId(preferredSellerId, buyerId) {
+  const preferredSeller = await getProfileById(preferredSellerId);
+  if (preferredSeller) {
+    return preferredSeller.id;
+  }
+
+  const { data: enterpriseSeller, error: enterpriseError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("is_enterprise", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (enterpriseError) {
+    throw enterpriseError;
+  }
+
+  if (enterpriseSeller?.id) {
+    return enterpriseSeller.id;
+  }
+
+  const buyerProfile = await getProfileById(buyerId);
+  if (buyerProfile) {
+    return buyerProfile.id;
+  }
+
+  throw new Error("No valid seller profile found for escrow creation");
+}
+
+function normalizeAmazonUrl(rawUrl) {
+  const parsedUrl = new URL(rawUrl);
+  const asinMatch =
+    parsedUrl.pathname.match(/\/dp\/([A-Z0-9]{10})/i) ||
+    parsedUrl.pathname.match(/\/gp\/product\/([A-Z0-9]{10})/i) ||
+    parsedUrl.pathname.match(/\/product\/([A-Z0-9]{10})/i);
+
+  if (asinMatch) {
+    return `${parsedUrl.origin}/dp/${asinMatch[1].toUpperCase()}`;
+  }
+
+  return `${parsedUrl.origin}${parsedUrl.pathname}`;
+}
+
+function cleanProductName(name = "") {
+  return name
+    .replace(/\s+/g, " ")
+    .replace(/^title:\s*/i, "")
+    .replace(/\|.*$/, "")
+    .replace(/\s*:\s*Amazon\.in.*$/i, "")
+    .replace(/\s+-\s+Amazon.*$/i, "")
+    .trim();
+}
+
+function parseAmazonPrice(rawPrice = "") {
+  const normalized = rawPrice.replace(/[^\d.,]/g, "").replace(/,/g, "");
+  const numeric = Number.parseFloat(normalized);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
+function guessPriceFromName(name = "") {
+  const n = name.toLowerCase();
+
+  if (n.includes("macbook")) return 199900;
+  if (n.includes("iphone")) return 79900;
+  if (n.includes("ipad")) return 45900;
+  if (n.includes("airpods")) return 21900;
+  if (n.includes("watch")) return 34900;
+  if (n.includes("headphone") || n.includes("headphones")) return 4999;
+  if (n.includes("earbud") || n.includes("earbuds")) return 1999;
+  if (n.includes("camera") || n.includes("nikon") || n.includes("canon")) return 54990;
+  if (n.includes("laptop")) return 69990;
+
+  // sensible demo floor so we never show ₹500 for premium items
+  return 2499;
+}
+
+function isClearlyBadPrice(price) {
+  return !Number.isFinite(price) || price <= 0 || price < 800;
+}
+
+function extractProductFromAmazonHtml(html, pageUrl) {
+  const $ = cheerio.load(html);
+
+  const name = cleanProductName(
+    $("#productTitle").first().text() ||
+      $('meta[name="title"]').attr("content") ||
+      $('meta[property="og:title"]').attr("content") ||
+      $("title").text()
+  );
+
+  const priceCandidates = [
+    $(".a-price.aok-align-center .a-offscreen").first().text(),
+    $("#corePrice_feature_div .a-offscreen").first().text(),
+    $("#corePriceDisplay_desktop_feature_div .a-offscreen").first().text(),
+    $("#priceblock_dealprice").text(),
+    $("#priceblock_ourprice").text(),
+    $("#priceblock_saleprice").text(),
+    $('meta[property="product:price:amount"]').attr("content"),
+  ];
+
+  const image =
+    $("#landingImage").attr("src") ||
+    $("#imgTagWrapperId img").attr("src") ||
+    $('meta[property="og:image"]').attr("content") ||
+    $('meta[name="og:image"]').attr("content") ||
+    "";
+
+  const price = priceCandidates.map(parseAmazonPrice).find(Boolean) || null;
+
+  if (!name || !price) {
+    throw new Error("Unable to parse Amazon HTML");
+  }
+
+  return {
+    name,
+    price,
+    image,
+    source: "amazon-html",
+    url: pageUrl,
+  };
+}
+
+function extractProductFromText(pageContent, pageUrl) {
+  const lines = pageContent
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const titleLine =
+    lines.find(
+      (line) =>
+        line.length > 20 &&
+        !/^https?:\/\//i.test(line) &&
+        !/^\d[\d,.\s]*$/.test(line) &&
+        !/delivery|returns|visit the|prime|add to cart/i.test(line)
+    ) || "";
+
+  const priceMatch = pageContent.match(/(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d{1,2})?)/i);
+  const imageMatch = pageContent.match(/https?:\/\/[^\s)]+(?:jpg|jpeg|png|webp)/i);
+
+  if (!titleLine || !priceMatch) {
+    throw new Error("Unable to parse fallback text");
+  }
+
+  return {
+    name: cleanProductName(titleLine),
+    price: parseAmazonPrice(priceMatch[1]),
+    image: imageMatch ? imageMatch[0] : "",
+    source: "jina-text",
+    url: pageUrl,
+  };
+}
+
+function extractNameFromUrlSlug(pageUrl) {
+  try {
+    const u = new URL(pageUrl);
+    const parts = u.pathname.split("/").filter(Boolean);
+    const slug = parts.find((p) => p.includes("-") && !p.includes("dp") && !p.includes("ref")) || "";
+    if (!slug) return "";
+    return cleanProductName(
+      slug
+        .replace(/%[0-9A-F]{2}/gi, " ")
+        .split("-")
+        .slice(0, 14)
+        .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+        .join(" ")
+    );
+  } catch {
+    return "";
+  }
+}
+
+async function resolveFinalUrl(inputUrl) {
+  // Works better than HEAD for Amazon short links
+  try {
+    const res = await axios.get(inputUrl, {
+      timeout: 8000,
+      maxRedirects: 6,
+      responseType: "text",
+      maxContentLength: 250_000,
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "en-IN,en;q=0.9",
+      },
+      validateStatus: (s) => s >= 200 && s < 400,
+    });
+
+    const finalUrl =
+      res?.request?.res?.responseUrl ||
+      res?.request?.path ||
+      inputUrl;
+
+    // If we got a path instead of URL, just return input
+    if (typeof finalUrl === "string" && finalUrl.startsWith("http")) return finalUrl;
+    return inputUrl;
+  } catch {
+    return inputUrl;
+  }
+}
+
+function demoGuessProductFromUrl(pageUrl) {
+  const name = extractNameFromUrlSlug(pageUrl) || "Amazon Imported Product";
+  return {
+    name,
+    price: guessPriceFromName(name),
+    image: `https://source.unsplash.com/featured/?product,${encodeURIComponent(name.split(" ").slice(0, 2).join(" "))}`,
+    source: "demo-guess",
+    url: pageUrl,
+  };
+}
+
 // ===================
 // SHOP ROUTES
 // ===================
@@ -94,16 +328,31 @@ function generateBlockchainHash(data) {
 app.post("/api/shop/analyze-link", async (req, res) => {
   try {
     let { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ success: false, error: "URL is required" });
+    }
     
-    // 0. Follow Redirects for short links (amzn.in)
-    if (url.includes('amzn.in')) {
-      try {
-        const redirectRes = await axios.head(url, { 
-          maxRedirects: 5,
-          headers: { 'User-Agent': 'Mozilla/5.0' } 
-        });
-        url = redirectRes.request.res.responseUrl || url;
-      } catch (e) { console.log("Redirect follow failed"); }
+    // 0. Resolve short links (amzn.in / other redirects)
+    url = await resolveFinalUrl(url);
+
+    url = normalizeAmazonUrl(url);
+
+    try {
+      const pageResponse = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Accept-Language": "en-IN,en;q=0.9",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        },
+      });
+
+      const product = extractProductFromAmazonHtml(pageResponse.data, url);
+      return res.json({ success: true, product });
+    } catch (error) {
+      console.log("Direct Amazon scrape failed, falling back to text extraction");
     }
 
     // 1. Visit the link using Jina Reader
@@ -120,6 +369,25 @@ app.post("/api/shop/analyze-link", async (req, res) => {
     } catch (e) {
       console.log("Jina Scrape failed, falling back to URL analysis");
     }
+
+    try {
+      const product = extractProductFromText(pageContent, url);
+      if (product?.price && !isClearlyBadPrice(product.price)) {
+        return res.json({ success: true, product });
+      }
+      throw new Error("Bad price from text");
+    } catch (error) {
+      console.log("Text extraction failed, using AI fallback");
+    }
+
+    // 2. Demo-safe deterministic fallback (no AI/network dependency)
+    // This keeps hackathon demos stable even when Amazon blocks scrapes.
+    try {
+      const demoProduct = demoGuessProductFromUrl(url);
+      if (demoProduct?.name && demoProduct?.price) {
+        return res.json({ success: true, product: demoProduct });
+      }
+    } catch {}
 
     const prompt = `You are a professional product data extractor. 
     
@@ -151,13 +419,25 @@ app.post("/api/shop/analyze-link", async (req, res) => {
     If data is missing, make a best guess based on the product type.`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
 
     const result = JSON.parse(response.choices[0]?.message?.content || "{}");
-    res.json({ success: true, product: result });
+    const cleanedName = cleanProductName(result?.name || "") || extractNameFromUrlSlug(url) || "Amazon Imported Product";
+    const parsedPrice = Number.isFinite(result?.price) ? Number(result.price) : parseAmazonPrice(String(result?.price || ""));
+    const safePrice = isClearlyBadPrice(parsedPrice) ? guessPriceFromName(cleanedName) : Math.round(parsedPrice);
+    res.json({
+      success: true,
+      product: {
+        ...result,
+        name: cleanedName,
+        price: safePrice,
+        source: "ai-fallback",
+        url,
+      },
+    });
   } catch (error) {
     console.error("Link analysis error:", error);
     res.status(400).json({ success: false, error: error.message });
@@ -181,7 +461,7 @@ Return only valid JSON.`;
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
@@ -260,6 +540,7 @@ app.get("/api/user/escrows", async (req, res) => {
 app.post("/api/escrows/create", async (req, res) => {
   try {
     const { buyer_id, seller_id, item_name, amount, company_wallet, inspection_period_hours } = req.body;
+    const resolvedSellerId = await resolveSellerId(seller_id, buyer_id);
 
     const auto_release_at = new Date();
     auto_release_at.setHours(auto_release_at.getHours() + (inspection_period_hours || 48));
@@ -269,11 +550,10 @@ app.post("/api/escrows/create", async (req, res) => {
       .from("escrows")
       .insert([{
         buyer_id,
-        seller_id,
+        seller_id: resolvedSellerId,
         item_name,
         amount,
         status: "active",
-        inspection_period_hours: inspection_period_hours || 48,
         auto_release_at: auto_release_at.toISOString(),
       }])
       .select()
@@ -311,7 +591,7 @@ app.post("/api/escrows/create", async (req, res) => {
       } catch (e) { console.log("Blockchain skipped"); }
     }
 
-    res.json({ success: true, escrow: { ...data, blockchain_tx_hash: txHash } });
+    res.json({ success: true, escrow: { ...data, seller_id: resolvedSellerId, blockchain_tx_hash: txHash } });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1131,7 +1411,7 @@ async function classifyInsuranceClaim(diagnosis, amount) {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
@@ -1156,7 +1436,7 @@ async function compareRentalPhotos(agreementId, moveOutPhotos) {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
@@ -1182,7 +1462,7 @@ async function analyzeEdTechComplaint(enrollmentId, complaint) {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
@@ -1207,7 +1487,7 @@ async function analyzeHospitalBill(admission, finalBill, consents) {
   
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });

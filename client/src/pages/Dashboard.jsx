@@ -10,12 +10,40 @@ const API_URL = 'http://localhost:3000/api';
 const Dashboard = () => {
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedEscrowId, setSelectedEscrowId] = useState(null);
   const [profile, setProfile] = useState(null);
   const [escrows, setEscrows] = useState([]);
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [ethAddress, setEthAddress] = useState('');
   const [ethBalance, setEthBalance] = useState('0.00');
+
+  const fetchData = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id || localStorage.getItem('zelcor_demo_id');
+    
+    if (!userId) return;
+
+    try {
+      const profileRes = await axios.get(`${API_URL}/auth/profile/${userId}`);
+      setProfile(profileRes.data.profile);
+
+      const escrowsRes = await axios.get(`${API_URL}/user/escrows?user_id=${userId}`);
+      setEscrows(escrowsRes.data.escrows || []);
+
+      setActivities([
+        { type: 'payment', message: 'Payment received', amount: 'Protected order added', time: 'Just now', icon: 'payments' },
+        { type: 'refund', message: 'Refund received', amount: '₹1,200', time: 'Today, 10:30 AM', icon: 'payments' },
+        { type: 'dispute', message: 'Complaint filed', amount: '₹15,000', time: 'Yesterday, 6:00 PM', icon: 'gavel' },
+        { type: 'blockchain', message: 'Blockchain proof verified', amount: '#CMP-001', time: 'Apr 25, 2026', icon: 'link' },
+      ]);
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const connectWallet = async () => {
     if (window.ethereum) {
@@ -37,32 +65,6 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    const fetchData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const userId = session?.user?.id || localStorage.getItem('zelcor_demo_id');
-      
-      if (!userId) return;
-
-      try {
-        const profileRes = await axios.get(`${API_URL}/auth/profile/${userId}`);
-        setProfile(profileRes.data.profile);
-
-        const escrowsRes = await axios.get(`${API_URL}/user/escrows?user_id=${userId}`);
-        setEscrows(escrowsRes.data.escrows || []);
-
-        setActivities([
-          { type: 'refund', message: 'Refund received', amount: '₹1,200', time: 'Today, 10:30 AM', icon: 'payments' },
-          { type: 'dispute', message: 'Complaint filed', amount: '₹15,000', time: 'Yesterday, 6:00 PM', icon: 'gavel' },
-          { type: 'blockchain', message: 'Blockchain proof verified', amount: '#CMP-001', time: 'Apr 25, 2026', icon: 'link' },
-        ]);
-
-      } catch (error) {
-        console.error('Error fetching dashboard data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchData();
 
     const subscription = supabase
@@ -74,6 +76,15 @@ const Dashboard = () => {
       supabase.removeChannel(subscription);
     };
   }, []);
+
+  const handleConfirmEscrow = async (escrowId) => {
+    try {
+      await axios.post(`${API_URL}/escrows/confirm`, { escrow_id: escrowId });
+      await fetchData();
+    } catch (error) {
+      alert('Could not confirm order: ' + (error.response?.data?.error || error.message));
+    }
+  };
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-[#f8f9fc] space-y-4">
@@ -97,7 +108,7 @@ const Dashboard = () => {
         </div>
         <nav className="flex-1 px-4 space-y-2">
           <NavItem icon="home" label="Home" href="/dashboard" active />
-          <NavItem icon="shopping_cart" label="Shop" href="/shop" />
+          <NavItem icon="shopping_bag" label="My Orders" href="/dashboard#orders" />
           <NavItem icon="lock" label="Escrows" href="/dashboard" />
           <NavItem icon="gavel" label="Complaints" href="/complaints" />
           <NavItem icon="verified" label="Certificates" href="/certificates" />
@@ -106,6 +117,7 @@ const Dashboard = () => {
           <div className="pt-4 mt-4 border-t border-slate-100">
             <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Industries</p>
           </div>
+          <NavItem icon="shopping_cart" label="Ecommerce" href="/shop" />
           <NavItem icon="health_and_safety" label="Insurance" href="/insurance" />
           <NavItem icon="apartment" label="Rental" href="/rental" />
           <NavItem icon="school" label="EdTech" href="/edtech" />
@@ -192,16 +204,16 @@ const Dashboard = () => {
 
           <section className="grid md:grid-cols-4 gap-6">
             <StatCard label="Protected Volume" val={`₹${stats.volume.toLocaleString()}`} desc="Live assurance active" icon="shield" color="primary" />
-            <StatCard label="Active Escrows" val={stats.activeCount} desc="Awaiting confirmation" icon="lock" color="secondary" />
+            <StatCard label="My Orders" val={stats.activeCount} desc="Awaiting confirmation" icon="shopping_bag" color="secondary" />
             <StatCard label="Refunded Total" val={`₹${stats.refundedTotal.toLocaleString()}`} desc="Money recovered" icon="undo" color="coral" />
             <StatCard label="Resolution Rate" val="100%" desc="Success guarantee" icon="check_circle" color="mint" />
           </section>
 
           <div className="grid lg:grid-cols-12 gap-10">
             <div className="lg:col-span-8 space-y-10">
-              <div className="space-y-6">
+              <div className="space-y-6" id="orders">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-h2 text-2xl text-slate-800 tracking-tight">Active Escrows <span className="text-slate-300 ml-2">{stats.activeCount}</span></h3>
+                  <h3 className="font-h2 text-2xl text-slate-800 tracking-tight">My Orders <span className="text-slate-300 ml-2">{stats.activeCount}</span></h3>
                   <button className="text-xs font-bold text-primary hover:underline">View All</button>
                 </div>
                 
@@ -219,7 +231,15 @@ const Dashboard = () => {
                     </div>
                   ) : (
                     escrows.filter(e => e.status === 'active' || e.status === 'disputed').map((item) => (
-                      <EscrowCard key={item.id} item={item} onReport={() => setIsModalOpen(true)} />
+                      <EscrowCard
+                        key={item.id}
+                        item={item}
+                        onConfirm={() => handleConfirmEscrow(item.id)}
+                        onReport={() => {
+                          setSelectedEscrowId(item.id);
+                          setIsModalOpen(true);
+                        }}
+                      />
                     ))
                   )}
                 </div>
@@ -290,7 +310,14 @@ const Dashboard = () => {
         </main>
       </div>
 
-      <ComplaintModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+      <ComplaintModal
+        isOpen={isModalOpen}
+        escrowId={selectedEscrowId}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedEscrowId(null);
+        }}
+      />
 
       <style dangerouslySetInnerHTML={{ __html: `
         .text-coral { color: #F27A6B; }
@@ -339,8 +366,9 @@ const QuickActionButton = ({ icon, label, href, color }) => (
   </a>
 );
 
-const EscrowCard = ({ item, onReport }) => {
-  const timeLeft = Math.max(0, Math.round((new Date(item.auto_release_at) - new Date()) / 3600000));
+const EscrowCard = ({ item, onConfirm, onReport }) => {
+  const expiryTime = item.auto_release_at || item.created_at;
+  const timeLeft = expiryTime ? Math.max(0, Math.round((new Date(expiryTime) - new Date()) / 3600000)) : 48;
   return (
     <div className="bg-white p-8 rounded-[40px] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-8 group hover:shadow-xl hover:shadow-slate-100 transition-all">
       <div className="flex items-center gap-6">
@@ -371,12 +399,17 @@ const EscrowCard = ({ item, onReport }) => {
         
         <div className="flex gap-2">
           {item.status === 'active' && (
-            <button className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-105 transition-all">Confirm</button>
+            <button
+              onClick={onConfirm}
+              className="px-6 py-3 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-primary/20 hover:scale-105 transition-all"
+            >
+              Confirm
+            </button>
           )}
           <button 
             onClick={onReport}
             className="px-6 py-3 border border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-50 hover:text-rose-500 hover:border-rose-100 transition-all"
-          >Report</button>
+          >Raise Complaint</button>
         </div>
       </div>
     </div>

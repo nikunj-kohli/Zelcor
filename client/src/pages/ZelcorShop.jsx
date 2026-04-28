@@ -1,17 +1,113 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
 const API_URL = 'http://localhost:3000/api';
-const RAZORPAY_KEY_ID = 'rzp_test_SiNWYQtLi82Njf';
+const PENDING_CHECKOUT_KEY = 'zelcor_pending_checkout';
+
+const cleanName = (name = '') =>
+  name
+    .replace(/^title:\s*/i, '')
+    .replace(/\s*:\s*Amazon\.in.*$/i, '')
+    .replace(/\s+-\s+Amazon.*$/i, '')
+    .replace(/\|.*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const guessPriceFromName = (name = '') => {
+  const n = name.toLowerCase();
+  if (n.includes('macbook')) return 199900;
+  if (n.includes('iphone')) return 79900;
+  if (n.includes('ipad')) return 45900;
+  if (n.includes('airpods')) return 21900;
+  if (n.includes('watch')) return 34900;
+  if (n.includes('headphone') || n.includes('headphones')) return 4999;
+  if (n.includes('earbud') || n.includes('earbuds')) return 1999;
+  if (n.includes('camera') || n.includes('nikon') || n.includes('canon')) return 54990;
+  if (n.includes('laptop')) return 69990;
+  return 2499;
+};
+
+const extractNameFromUrl = (url) => {
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean);
+    const slug =
+      parts.find((p) => p.includes('-') && !p.includes('dp') && !p.includes('ref')) || '';
+    if (!slug) return '';
+    const decoded = decodeURIComponent(slug).replace(/%[0-9A-F]{2}/gi, ' ');
+    return cleanName(
+      decoded
+        .split('-')
+        .slice(0, 14)
+        .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+        .join(' ')
+    );
+  } catch {
+    return '';
+  }
+};
+
+const isBadPrice = (p) => !Number.isFinite(p) || p <= 0;
+
+const minExpectedPriceForName = (name = '') => {
+  const n = name.toLowerCase();
+  if (n.includes('macbook')) return 50000;
+  if (n.includes('iphone')) return 30000;
+  if (n.includes('ipad')) return 15000;
+  if (n.includes('airpods')) return 8000;
+  if (n.includes('watch')) return 8000;
+  if (n.includes('camera') || n.includes('nikon') || n.includes('canon')) return 20000;
+  if (n.includes('laptop')) return 25000;
+  if (n.includes('headphone') || n.includes('headphones')) return 300;
+  if (n.includes('earbud') || n.includes('earbuds')) return 200;
+  // For unknown categories, trust backend price if it is positive.
+  return 1;
+};
+
+const isUnrealisticPriceForName = (name, price) => {
+  if (!Number.isFinite(price)) return true;
+  return price < minExpectedPriceForName(name);
+};
+
+const getDemoImageByName = (name = '') => {
+  const n = name.toLowerCase();
+
+  // Stable, deterministic images for demo quality
+  if (n.includes('macbook') || n.includes('laptop')) {
+    return 'https://images.unsplash.com/photo-1611186871348-b1ce696e52c9?auto=format&fit=crop&q=80&w=800';
+  }
+  if (n.includes('iphone')) {
+    return 'https://images.unsplash.com/photo-1696446701796-da61225697cc?auto=format&fit=crop&q=80&w=800';
+  }
+  if (n.includes('headphone') || n.includes('headphones')) {
+    return 'https://images.unsplash.com/photo-1670055255470-362208f02905?auto=format&fit=crop&q=80&w=800';
+  }
+  if (n.includes('airpods') || n.includes('earbud') || n.includes('earbuds')) {
+    return 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?auto=format&fit=crop&q=80&w=800';
+  }
+  if (n.includes('watch')) {
+    return 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=800';
+  }
+  if (n.includes('camera') || n.includes('nikon') || n.includes('canon')) {
+    return 'https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&q=80&w=800';
+  }
+
+  return 'https://images.unsplash.com/photo-1484704849700-f032a568e944?auto=format&fit=crop&q=80&w=800';
+};
 
 const ZelcorShop = () => {
   const [loading, setLoading] = useState(false);
   const [amazonLink, setAmazonLink] = useState('');
   const [scannedProduct, setScannedProduct] = useState(null);
+  const [importError, setImportError] = useState('');
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
+  const [demoPaymentUrl, setDemoPaymentUrl] = useState('');
+  const [showDemoPayment, setShowDemoPayment] = useState(false);
+  const [demoCheckoutError, setDemoCheckoutError] = useState('');
+  const latestImportRequestRef = useRef(0);
   const navigate = useNavigate();
 
   const products = [
@@ -22,75 +118,95 @@ const ZelcorShop = () => {
   ];
 
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    document.body.appendChild(script);
-    
     // Load cart from local storage if exists
     const savedCart = localStorage.getItem('zelcor_cart');
     if (savedCart) {
       setCart(JSON.parse(savedCart));
     }
-
-    return () => {
-      document.body.removeChild(script);
-    };
   }, []);
 
   useEffect(() => {
     localStorage.setItem('zelcor_cart', JSON.stringify(cart));
   }, [cart]);
 
-  const handleAmazonLinkChange = async (e) => {
-    const url = e.target.value;
-    setAmazonLink(url);
-    
-    if (url.includes('amazon') || url.includes('amzn')) {
-      setLoading(true);
+  const handleAmazonLinkChange = (e) => {
+    setAmazonLink(e.target.value);
+    setImportError('');
+  };
 
-      // Instant Local Parsing (Smart Extraction from URL slug)
-      let detectedName = "Amazon Product";
-      try {
-        const urlObj = new URL(url);
-        const pathParts = urlObj.pathname.split('/');
-        // Amazon URLs usually have the name in the first or second segment
-        const slug = pathParts.find(p => p.length > 10 && !p.includes('dp') && !p.includes('ref')) || "";
-        if (slug) {
-          detectedName = slug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ').replace(/\d{10,}/g, '').trim();
-        }
-      } catch (e) { console.log("URL parse error"); }
+  const handleAmazonImport = async () => {
+    const url = amazonLink.trim();
 
-      try {
-        // Try Backend AI first
-        const res = await axios.post(`${API_URL}/shop/analyze-link`, { url });
-        if (res.data.success && res.data.product.name !== "Product Name") {
-          setScannedProduct({
-            ...res.data.product,
-            id: 'scanned-' + Date.now(),
-            url: url
-          });
-        } else {
-          throw new Error("AI returned generic response");
-        }
-      } catch (error) {
-        // Smart Local Fallback
-        const randomPrice = Math.floor(Math.random() * (5000 - 500 + 1)) + 500;
-        const categories = ['gadget', 'home', 'apparel', 'art'];
-        const randomCat = categories[Math.floor(Math.random() * categories.length)];
-        
-        setScannedProduct({
-          id: 'scanned-' + Date.now(),
-          name: detectedName || "Amazon Imported Item",
-          price: detectedName.toLowerCase().includes('iphone') ? 79900 : (detectedName.toLowerCase().includes('watch') ? 41900 : randomPrice),
-          image: `https://source.unsplash.com/featured/?${randomCat},product`,
-          url: url
-        });
-      } finally {
+    if (!url) {
+      setImportError('Paste an Amazon product URL first.');
+      setScannedProduct(null);
+      return;
+    }
+
+    if (!url.includes('amazon') && !url.includes('amzn')) {
+      setImportError('Please paste a valid Amazon product URL.');
+      setScannedProduct(null);
+      return;
+    }
+
+    const requestId = Date.now();
+    latestImportRequestRef.current = requestId;
+    setLoading(true);
+    setImportError('');
+
+    try {
+      const res = await axios.post(`${API_URL}/shop/analyze-link`, { url });
+      const product = res.data?.product;
+
+      if (!res.data?.success) {
+        throw new Error('Could not extract product details');
+      }
+
+      // Demo-reliable fallback (restore previous "looks correct" behavior)
+      const localName = extractNameFromUrl(url);
+      const apiName = cleanName(product?.name || '');
+      const safeName =
+        apiName && apiName !== 'Product Name' && apiName !== 'Amazon Imported Product'
+          ? apiName
+          : localName || 'Amazon Imported Product';
+
+      const apiPrice = Number(product?.price);
+      const safePrice =
+        !isBadPrice(apiPrice) && !isUnrealisticPriceForName(safeName, apiPrice)
+          ? Math.round(apiPrice)
+          : guessPriceFromName(safeName);
+
+      const fallbackImage = getDemoImageByName(safeName);
+      const safeImage =
+        product?.source === 'amazon-html' && product?.image
+          ? product.image
+          : fallbackImage;
+
+      if (latestImportRequestRef.current !== requestId) {
+        return;
+      }
+
+      setScannedProduct({
+        ...product,
+        name: safeName,
+        price: safePrice,
+        image: safeImage,
+        id: `scanned-${requestId}`,
+        url,
+      });
+    } catch (error) {
+      if (latestImportRequestRef.current !== requestId) {
+        return;
+      }
+
+      setScannedProduct(null);
+      setImportError(
+        error.response?.data?.error || 'Could not fetch the product from Amazon. Try a clean product URL with `/dp/ASIN`.'
+      );
+    } finally {
+      if (latestImportRequestRef.current === requestId) {
         setLoading(false);
       }
-    } else {
-      setScannedProduct(null);
     }
   };
 
@@ -111,6 +227,7 @@ const ZelcorShop = () => {
     if (cart.length === 0) return;
     
     setLoading(true);
+    setDemoCheckoutError('');
     const { data: { session } } = await supabase.auth.getSession();
     const user = session?.user;
     const userId = user?.id || localStorage.getItem('zelcor_demo_id');
@@ -128,7 +245,6 @@ const ZelcorShop = () => {
       
       const res = await axios.post(`${API_URL}/escrows/create`, {
         buyer_id: userId,
-        seller_id: '88888888-8888-8888-8888-888888888888', // Demo Store ID
         item_name: cart.length > 1 ? `${cart.length} Products Package` : cart[0].name,
         amount: totalAmount,
         company_wallet: '0x321...456',
@@ -137,49 +253,24 @@ const ZelcorShop = () => {
 
       if (res.data.success) {
         const { escrow } = res.data;
-        
-        const options = {
-          key: RAZORPAY_KEY_ID,
-          amount: totalAmount * 100,
-          currency: 'INR',
-          name: 'Zelcor Shop',
-          description: `Checkout for ${cart.length} items`,
-          order_id: escrow.razorpay_order_id,
-          handler: async function (response) {
-            // Register remaining items as individual escrows (simulated background task)
-            if (cart.length > 1) {
-              for (let i = 1; i < cart.length; i++) {
-                 await axios.post(`${API_URL}/escrows/create`, {
-                    buyer_id: userId,
-                    seller_id: '88888888-8888-8888-8888-888888888888',
-                    item_name: cart[i].name,
-                    amount: cart[i].price,
-                    company_wallet: '0x321...456',
-                    inspection_period_hours: 48
-                 });
-              }
-            }
-            
-            setCart([]);
-            localStorage.removeItem('zelcor_cart');
-            alert(`🎉 Purchase Successful! All ${cart.length} items are now protected by Zelcor Escrow.`);
-            navigate('/dashboard');
-          },
-          prefill: {
-            name: user?.user_metadata?.full_name || 'Demo User',
-            email: user?.email || 'demo@zelcor.io',
-          },
-          theme: {
-            color: '#1A5F7A',
-          },
-        };
+        const paymentUrl = `${window.location.origin}/payment-success?escrow_id=${escrow.id}&demo=1`;
 
-        const rzp = new window.Razorpay(options);
-        rzp.open();
+        localStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify({
+          primaryEscrowId: escrow.id,
+          userId,
+          cart,
+          createdAt: Date.now(),
+        }));
+        setDemoPaymentUrl(paymentUrl);
+        setShowDemoPayment(true);
+      } else {
+        setDemoCheckoutError(res.data?.error || 'Could not create escrow order.');
+        setShowDemoPayment(true);
       }
     } catch (error) {
       console.error('Checkout error:', error);
-      alert('Checkout error: ' + (error.response?.data?.error || error.message));
+      setDemoCheckoutError(error.response?.data?.error || error.message || 'Checkout failed');
+      setShowDemoPayment(true);
     } finally {
       setLoading(false);
     }
@@ -275,14 +366,26 @@ const ZelcorShop = () => {
                   type="text" 
                   value={amazonLink}
                   onChange={handleAmazonLinkChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAmazonImport();
+                    }
+                  }}
                   placeholder="https://www.amazon.in/dp/B0CHX2W7S4..." 
                   className="bg-transparent flex-1 px-4 outline-none text-sm placeholder:text-slate-500"
                 />
-                <button className="px-6 py-3 bg-primary text-white rounded-xl font-bold text-xs flex items-center gap-2">
+                <button
+                  onClick={handleAmazonImport}
+                  disabled={loading}
+                  className="px-6 py-3 bg-primary text-white rounded-xl font-bold text-xs flex items-center gap-2 disabled:opacity-60"
+                >
                   <span className="material-symbols-outlined text-sm">link</span>
                   {loading ? 'Scanning...' : 'Import'}
                 </button>
              </div>
+             {importError && (
+               <p className="text-rose-300 text-sm">{importError}</p>
+             )}
              <p className="text-slate-400 text-sm italic">Zelcor automatically detects price and details for escrow creation.</p>
           </div>
           <div className="absolute top-[-50px] right-[-50px] w-96 h-96 bg-primary/20 rounded-full blur-[100px]"></div>
@@ -369,6 +472,119 @@ const ZelcorShop = () => {
       {/* Cart Backdrop */}
       {showCart && (
         <div onClick={() => setShowCart(false)} className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[90] animate-in fade-in duration-300"></div>
+      )}
+
+      {showDemoPayment && (
+        <>
+          <div
+            onClick={() => setShowDemoPayment(false)}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[110]"
+          ></div>
+          <div className="fixed inset-0 z-[120] flex items-center justify-center p-6">
+            <div className="w-full max-w-3xl bg-white rounded-[40px] border border-slate-100 shadow-2xl overflow-hidden">
+              <div className="grid md:grid-cols-[280px_1fr]">
+                <div className="bg-primary text-white p-8 space-y-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center font-black">Z</div>
+                    <div>
+                      <p className="font-black text-xl tracking-tight">Razorpay Demo</p>
+                      <p className="text-xs text-white/70 uppercase tracking-[0.2em]">Hackathon Mode</p>
+                    </div>
+                  </div>
+                  <div className="bg-white/10 rounded-2xl p-5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70">Protected Amount</p>
+                    <p className="text-4xl font-black mt-2">₹{totalAmount.toLocaleString()}</p>
+                  </div>
+                  <div className="text-sm text-white/80 leading-relaxed">
+                    This is a demo checkout. Click Next to simulate payment received and add this order to My Orders, where you can Confirm or Raise Complaint.
+                  </div>
+                </div>
+
+                <div className="p-8 md:p-10 space-y-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-primary">Razorpay Demo Checkout</p>
+                      <h3 className="text-3xl font-black text-slate-900 mt-2">Payment options</h3>
+                    </div>
+                    <button
+                      onClick={() => setShowDemoPayment(false)}
+                      className="material-symbols-outlined text-slate-400 hover:text-slate-900"
+                    >
+                      close
+                    </button>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="w-full grid md:grid-cols-[1fr_300px] gap-6 items-start">
+                      <div className="w-full rounded-3xl border border-slate-100 bg-slate-50 p-6">
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-4">
+                          Payment options (demo)
+                        </p>
+                        <div className="space-y-3 text-sm font-bold text-slate-700">
+                          {['UPI', 'Cards', 'EMI', 'Netbanking', 'Wallet', 'Pay Later'].map((x) => (
+                            <div key={x} className="flex items-center justify-between rounded-2xl bg-white border border-slate-100 px-4 py-3">
+                              <span>{x}</span>
+                              <span className="material-symbols-outlined text-slate-300">chevron_right</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-4">
+                          Hackathon mode: click <span className="font-black text-slate-600">Next</span> to simulate “Payment received”.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-full flex items-center justify-between">
+                          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">UPI QR (optional)</p>
+                          <p className="text-[10px] font-bold text-slate-300">demo</p>
+                        </div>
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(demoPaymentUrl)}`}
+                          alt="Demo payment QR"
+                          className="w-[260px] h-[260px] rounded-3xl border border-slate-100 p-3 bg-white"
+                        />
+                        <p className="text-xs text-slate-400 text-center">
+                          Scanning opens the success link, but “Next” is the main demo flow.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {demoCheckoutError && (
+                    <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-500 mb-1">Checkout Error</p>
+                      <p className="text-sm text-rose-700">{demoCheckoutError}</p>
+                      <p className="text-xs text-rose-600 mt-2">
+                        For demo: ensure backend is running on <span className="font-bold">localhost:3000</span> and Supabase keys are correct.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-2">Callback Link</p>
+                    <p className="text-xs text-slate-600 break-all">{demoPaymentUrl}</p>
+                  </div>
+
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <button
+                      onClick={() => window.location.href = demoPaymentUrl}
+                      disabled={!demoPaymentUrl}
+                      className="flex-1 px-6 py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em]"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => setShowDemoPayment(false)}
+                      className="px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-[0.2em]"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <footer className="p-12 text-center border-t border-slate-50 mt-20">

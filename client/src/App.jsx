@@ -17,6 +17,7 @@ import Insurance from './pages/Insurance';
 import Rental from './pages/Rental';
 import EdTech from './pages/EdTech';
 import Hospital from './pages/Hospital';
+import PaymentSuccess from './pages/PaymentSuccess';
 
 
 function App() {
@@ -60,6 +61,7 @@ function App() {
       <Route path="/profile" element={session ? <Profile /> : <Navigate to="/auth" />} />
       <Route path="/settings" element={session ? <Settings /> : <Navigate to="/auth" />} />
       <Route path="/shop" element={<ZelcorShop />} />
+      <Route path="/payment-success" element={<PaymentSuccess />} />
       <Route path="/support" element={<Support />} />
       
       {/* Industry Routes */}
