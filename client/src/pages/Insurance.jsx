@@ -456,146 +456,154 @@ const Insurance = () => {
 
       {/* File Claim Modal (Intake Form from screenshot) */}
       {showFileClaim && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-2xl overflow-y-auto">
-          <div className="bg-white rounded-[64px] w-full max-w-2xl p-16 shadow-2xl my-10 animate-in slide-in-from-bottom-12 duration-700 relative overflow-hidden">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-10 bg-slate-900/80 backdrop-blur-2xl">
+          <div className="bg-white rounded-[40px] md:rounded-[64px] w-full max-w-2xl h-full max-h-[90vh] shadow-2xl animate-in slide-in-from-bottom-12 duration-700 relative overflow-hidden flex flex-col">
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-primary to-primary-container"></div>
             
-            <div className="flex items-center justify-between mb-12">
+            {/* Modal Header - Fixed */}
+            <div className="p-8 md:p-16 pb-0 flex items-center justify-between mb-8">
                <div>
                  <p className="text-[10px] font-black text-primary uppercase tracking-[0.3em] mb-2">Claim Intake</p>
-                 <h2 className="text-5xl font-black text-slate-900 tracking-tight">File Insurance Claim</h2>
+                 <h2 className="text-3xl md:text-5xl font-black text-slate-900 tracking-tight">File Insurance Claim</h2>
                </div>
                <button onClick={() => setShowFileClaim(false)} className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all hover:rotate-90">
                  <span className="material-symbols-outlined text-2xl">close</span>
                </button>
             </div>
 
-            <form onSubmit={handleSubmitClaim} className="space-y-10">
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Policy Package</label>
-                <select 
-                  className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold text-slate-900 focus:border-primary/20 focus:bg-white transition-all outline-none appearance-none"
-                  value={formData.purchase_id}
-                  onChange={(e) => setFormData({ ...formData, purchase_id: e.target.value })}
-                  required
-                >
-                  <option value="">Select a purchased policy</option>
-                  {purchases.map(p => (
-                    <option key={p.id} value={p.id}>{p.insurance_policies?.name} - #{p.id.slice(0, 8)}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Diagnosis</label>
-                <input 
-                  type="text" 
-                  className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
-                  placeholder="e.g., cardiac arrest, surgery, cancer treatment"
-                  value={formData.diagnosis}
-                  onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
-                  required
-                />
-                <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest px-2">Critical keywords can trigger faster insurer response deadlines.</p>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Symptoms / Current Condition</label>
-                <textarea 
-                  className="w-full px-8 py-6 rounded-[32px] bg-slate-50 border-2 border-transparent font-medium placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none min-h-[140px]"
-                  placeholder="e.g., chest pain, breathlessness, ICU admission, severe bleeding"
-                  value={formData.symptoms}
-                  onChange={(e) => setFormData({ ...formData, symptoms: e.target.value })}
-                  required
-                ></textarea>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
+            {/* Modal Body - Scrollable */}
+            <div className="flex-1 overflow-y-auto px-8 md:px-16 pb-16 custom-scrollbar">
+              <form onSubmit={handleSubmitClaim} className="space-y-10">
                 <div className="space-y-3">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Admission Type</label>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Policy Package</label>
                   <select 
-                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold outline-none focus:border-primary/20 focus:bg-white transition-all"
-                    value={formData.admission_type}
-                    onChange={(e) => setFormData({ ...formData, admission_type: e.target.value })}
+                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold text-slate-900 focus:border-primary/20 focus:bg-white transition-all outline-none appearance-none"
+                    value={formData.purchase_id}
+                    onChange={(e) => setFormData({ ...formData, purchase_id: e.target.value })}
+                    required
                   >
-                    <option value="OPD / Routine">OPD / Routine</option>
-                    <option value="Inpatient">Inpatient</option>
-                    <option value="Emergency / ICU">Emergency / ICU</option>
+                    <option value="">Select a purchased policy</option>
+                    {purchases.length > 0 ? (
+                      purchases.map(p => (
+                        <option key={p.id} value={p.id}>{p.insurance_policies?.name} - #{p.id.slice(0, 8)}</option>
+                      ))
+                    ) : (
+                      <option disabled>No active policies found</option>
+                    )}
                   </select>
                 </div>
+
                 <div className="space-y-3">
-                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Treatment Type</label>
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Diagnosis</label>
                   <input 
                     type="text" 
-                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 outline-none focus:border-primary/20 focus:bg-white transition-all"
-                    placeholder="e.g., surgery, chemo, dialysis"
-                    value={formData.treatment_type}
-                    onChange={(e) => setFormData({ ...formData, treatment_type: e.target.value })}
+                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
+                    placeholder="e.g., cardiac arrest, surgery, cancer treatment"
+                    value={formData.diagnosis}
+                    onChange={(e) => setFormData({ ...formData, diagnosis: e.target.value })}
+                    required
+                  />
+                  <p className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest px-2">Critical keywords can trigger faster insurer response deadlines.</p>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Symptoms / Current Condition</label>
+                  <textarea 
+                    className="w-full px-8 py-6 rounded-[32px] bg-slate-50 border-2 border-transparent font-medium placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none min-h-[140px]"
+                    placeholder="e.g., chest pain, breathlessness, ICU admission, severe bleeding"
+                    value={formData.symptoms}
+                    onChange={(e) => setFormData({ ...formData, symptoms: e.target.value })}
+                    required
+                  ></textarea>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Admission Type</label>
+                    <select 
+                      className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold outline-none focus:border-primary/20 focus:bg-white transition-all"
+                      value={formData.admission_type}
+                      onChange={(e) => setFormData({ ...formData, admission_type: e.target.value })}
+                    >
+                      <option value="OPD / Routine">OPD / Routine</option>
+                      <option value="Inpatient">Inpatient</option>
+                      <option value="Emergency / ICU">Emergency / ICU</option>
+                    </select>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Treatment Type</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 outline-none focus:border-primary/20 focus:bg-white transition-all"
+                      placeholder="e.g., surgery, chemo, dialysis"
+                      value={formData.treatment_type}
+                      onChange={(e) => setFormData({ ...formData, treatment_type: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Hospital Name</label>
+                  <input 
+                    type="text" 
+                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
+                    placeholder="e.g., Apollo Hospital"
+                    value={formData.hospital_name}
+                    onChange={(e) => setFormData({ ...formData, hospital_name: e.target.value })}
+                    required
                   />
                 </div>
-              </div>
 
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Hospital Name</label>
-                <input 
-                  type="text" 
-                  className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
-                  placeholder="e.g., Apollo Hospital"
-                  value={formData.hospital_name}
-                  onChange={(e) => setFormData({ ...formData, hospital_name: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Claim Amount (Rs.)</label>
-                <input 
-                  type="number" 
-                  className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
-                  placeholder="e.g., 1200000"
-                  value={formData.claim_amount}
-                  onChange={(e) => setFormData({ ...formData, claim_amount: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Doctor Note / Medical Summary</label>
-                <textarea 
-                  className="w-full px-8 py-6 rounded-[32px] bg-slate-50 border-2 border-transparent font-medium placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none min-h-[120px]"
-                  placeholder="Paste a short discharge summary, doctor note, or medical finding."
-                  value={formData.doctor_note}
-                  onChange={(e) => setFormData({ ...formData, doctor_note: e.target.value })}
-                  required
-                ></textarea>
-              </div>
-
-              <div className="space-y-3">
-                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Policy Document / Hospital Receipts</label>
-                <div className="w-full bg-slate-50 rounded-[24px] p-8 border-2 border-dashed border-slate-200 hover:border-primary/30 transition-all group flex flex-col items-center justify-center gap-2 cursor-pointer">
-                   <span className="material-symbols-outlined text-slate-200 group-hover:text-primary transition-colors text-3xl">upload_file</span>
-                   <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Choose File <span className="text-slate-300 font-bold ml-1">No file chosen</span></p>
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Claim Amount (Rs.)</label>
+                  <input 
+                    type="number" 
+                    className="w-full px-8 py-5 rounded-[24px] bg-slate-50 border-2 border-transparent font-bold placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none"
+                    placeholder="e.g., 1200000"
+                    value={formData.claim_amount}
+                    onChange={(e) => setFormData({ ...formData, claim_amount: e.target.value })}
+                    required
+                  />
                 </div>
-              </div>
 
-              <div className="flex gap-4 pt-6">
-                <button 
-                  type="button"
-                  onClick={() => setShowFileClaim(false)}
-                  className="flex-1 py-6 border-2 border-slate-100 text-slate-500 rounded-[28px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-50 transition-all"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-[2] py-6 bg-slate-900 text-white rounded-[28px] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-black hover:scale-[1.01] transition-all flex items-center justify-center gap-3"
-                >
-                  {submitting ? <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div> : <span className="material-symbols-outlined">analytics</span>}
-                  File Claim
-                </button>
-              </div>
-            </form>
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Doctor Note / Medical Summary</label>
+                  <textarea 
+                    className="w-full px-8 py-6 rounded-[32px] bg-slate-50 border-2 border-transparent font-medium placeholder:text-slate-300 focus:border-primary/20 focus:bg-white transition-all outline-none min-h-[120px]"
+                    placeholder="Paste a short discharge summary, doctor note, or medical finding."
+                    value={formData.doctor_note}
+                    onChange={(e) => setFormData({ ...formData, doctor_note: e.target.value })}
+                    required
+                  ></textarea>
+                </div>
+
+                <div className="space-y-3">
+                  <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Policy Document / Hospital Receipts</label>
+                  <div className="w-full bg-slate-50 rounded-[24px] p-8 border-2 border-dashed border-slate-200 hover:border-primary/30 transition-all group flex flex-col items-center justify-center gap-2 cursor-pointer">
+                     <span className="material-symbols-outlined text-slate-200 group-hover:text-primary transition-colors text-3xl">upload_file</span>
+                     <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Choose File <span className="text-slate-300 font-bold ml-1">No file chosen</span></p>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-6 sticky bottom-0 bg-white/90 backdrop-blur-md pb-4">
+                  <button 
+                    type="button"
+                    onClick={() => setShowFileClaim(false)}
+                    className="flex-1 py-6 border-2 border-slate-100 text-slate-500 rounded-[28px] font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-50 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-[2] py-6 bg-slate-900 text-white rounded-[28px] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-black hover:scale-[1.01] transition-all flex items-center justify-center gap-3"
+                  >
+                    {submitting ? <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div> : <span className="material-symbols-outlined">analytics</span>}
+                    File Claim
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
