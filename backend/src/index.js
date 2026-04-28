@@ -8,9 +8,14 @@ import * as cheerio from "cheerio";
 import { ethers } from "ethers";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
+import path from "path";
+import { fileURLToPath } from "url";
 
 // Load environment variables
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, ".env") });
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,6 +23,646 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// -------------------------
+// Zelcor Rental Module (In-Memory)
+// -------------------------
+const rentalDemoStore = {
+  rentalsById: {},
+  rentalOrder: [],
+  photosByRentalId: {},
+  analysesByRentalId: {},
+  settlementsByRentalId: {},
+};
+
+function sha256(input) {
+  return crypto.createHash("sha256").update(String(input)).digest("hex");
+}
+
+function rentalMoney(value) {
+  return Number(Number(value || 0).toFixed(2));
+}
+
+function rentalFromInput(input) {
+  const deposit = rentalMoney(input.deposit ?? input.depositAmount);
+  const ownerBondAmount = rentalMoney(input.ownerBondAmount ?? deposit * 0.5);
+  return {
+    id: input.id || `rental_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    propertyAddress: input.propertyAddress || input.property || "",
+    tenantName: input.tenantName || input.tenant || "",
+    landlordName: input.landlordName || input.landlord || "",
+    depositAmount: deposit,
+    ownerBondAmount,
+    ownerBondStatus: "HELD",
+    tenantWalletBalance: rentalMoney(input.tenantWalletBalance || 0),
+    moveInDate: input.moveInDate || "",
+    status: input.status || "READY",
+    createdAt: input.createdAt || new Date().toISOString(),
+  };
+}
+
+function normalizeRentalLabel(label) {
+  return String(label || "")
+    .toLowerCase()
+    .replace(/\b(broken|cracked|crack|damaged|damage|stained|stain|burnt|burn|new|old|move|out|in)\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function scoreRentalPair(rental, moveInPhoto, moveOutPhoto) {
+  if (!moveInPhoto) {
+    return {
+      status: "DAMAGE",
+      deduction: Math.min(10000, rental.depositAmount * 0.1),
+      confidence: 0.82,
+      notes: "Move-out image has no matching move-in evidence.",
+    };
+  }
+
+  if (moveInPhoto.expectedStatus || moveOutPhoto.expectedStatus) {
+    const status = moveOutPhoto.expectedStatus || moveInPhoto.expectedStatus;
+    return {
+      status,
+      deduction: status === "DAMAGE" ? Math.min(20000, rental.depositAmount * 0.2) : 0,
+      confidence: 0.93,
+      notes: "Demo evidence classification.",
+    };
+  }
+
+  if (moveInPhoto.hash === moveOutPhoto.hash) {
+    return {
+      status: "PRE_EXISTING",
+      deduction: 0,
+      confidence: 0.98,
+      notes: "Condition appears unchanged from move-in evidence.",
+    };
+  }
+
+  const label = `${moveInPhoto.label} ${moveOutPhoto.label} ${moveOutPhoto.filename || ""}`.toLowerCase();
+  const damageWords = ["broken", "crack", "damage", "stain", "burn", "leak", "hole", "appliance"];
+  const hasDamageWord = damageWords.some((word) => label.includes(word));
+  if (hasDamageWord) {
+    return {
+      status: "DAMAGE",
+      deduction: Math.min(20000, Math.max(2000, rental.depositAmount * 0.08)),
+      confidence: 0.86,
+      notes: "New visible damage likely requires repair or replacement.",
+    };
+  }
+
+  return {
+    status: "WEAR_TEAR",
+    deduction: 0,
+    confidence: 0.78,
+    notes: "Difference is treated as normal use without deposit deduction.",
+  };
+}
+
+function normalizeAiStatus(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[\s-]+/g, "_");
+  if (normalized.includes("PRE")) return "PRE_EXISTING";
+  if (normalized.includes("WEAR")) return "WEAR_TEAR";
+  if (normalized.includes("DAMAGE") || normalized.includes("NEW")) return "DAMAGE";
+  return "WEAR_TEAR";
+}
+
+function imageDataUriToBase64(image = "") {
+  return String(image).includes(",") ? String(image).split(",").pop() : String(image);
+}
+
+function clampDeduction(value, fallbackValue) {
+  const amount = rentalMoney(value);
+  if (!Number.isFinite(amount) || amount < 0) return fallbackValue;
+  return amount;
+}
+
+function roboflowDamageConfig() {
+  return {
+    endpoint:
+      process.env.ROBOFLOW_DAMAGE_LEVEL_ENDPOINT ||
+      process.env.ROBOFLOW_DAMAGE_ENDPOINT ||
+      process.env.ROBOFLOW_ENDPOINT ||
+      "",
+    apiKey: process.env.ROBOFLOW_API_KEY || "",
+  };
+}
+
+function parseDamageModelResult(raw, rental, moveOutPhoto, fallback) {
+  const predictions = Array.isArray(raw)
+    ? raw
+    : Array.isArray(raw?.predictions)
+      ? raw.predictions
+      : [];
+  const highestConfidence = predictions.reduce((max, prediction) => Math.max(max, Number(prediction.confidence || prediction.score || 0)), 0);
+  const classes = predictions.map((prediction) => String(prediction.class || prediction.label || "").toLowerCase());
+  const text = JSON.stringify(raw || {}).toLowerCase();
+  const severityText = [...classes, text].join(" ");
+  const severity = /severe|critical|heavy|high/.test(severityText)
+    ? "severe"
+    : /moderate|medium/.test(severityText)
+      ? "moderate"
+      : /minor|low|light/.test(severityText)
+        ? "minor"
+        : "";
+  const hasDamage =
+    classes.some((item) => /damage|crack|broken|stain|hole|leak|burn/.test(item)) ||
+    /damage|crack|broken|stain|hole|leak|burn/.test(text) ||
+    Boolean(severity);
+
+  if (!hasDamage) {
+    return {
+      status: fallback.status === "PRE_EXISTING" ? "PRE_EXISTING" : "WEAR_TEAR",
+      deduction: 0,
+      confidence: highestConfidence || fallback.confidence,
+      notes: "Roboflow damage-level model did not detect chargeable damage.",
+      modelSource: "roboflow-damage-level",
+    };
+  }
+
+  const fallbackDamage = Math.min(20000, Math.max(2000, rental.depositAmount * 0.08));
+  const severityDeduction =
+    severity === "severe"
+      ? Math.min(rental.depositAmount, Math.max(fallbackDamage, rental.depositAmount * 0.2))
+      : severity === "moderate"
+        ? Math.min(rental.depositAmount, Math.max(fallbackDamage, rental.depositAmount * 0.12))
+        : severity === "minor"
+          ? Math.min(rental.depositAmount, Math.max(1000, rental.depositAmount * 0.04))
+          : fallbackDamage;
+
+  return {
+    status: "DAMAGE",
+    deduction: clampDeduction(raw?.deduction || raw?.deductionAmount, severityDeduction),
+    confidence: highestConfidence || Number(raw?.confidence || fallback.confidence || 0.85),
+    notes: raw?.notes || `Roboflow damage-level model detected ${severity || "possible"} damage for ${moveOutPhoto.label}.`,
+    modelSource: "roboflow-damage-level",
+  };
+}
+
+async function analyzeRentalPairWithConfiguredImageModel(rental, moveOutPhoto, fallback) {
+  const { endpoint: roboflowEndpoint, apiKey: roboflowKey } = roboflowDamageConfig();
+  if (roboflowEndpoint && roboflowKey) {
+    try {
+      const separator = roboflowEndpoint.includes("?") ? "&" : "?";
+      const response = await axios.post(
+        `${roboflowEndpoint}${separator}api_key=${encodeURIComponent(roboflowKey)}`,
+        imageDataUriToBase64(moveOutPhoto.image),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 20000 }
+      );
+      return parseDamageModelResult(response.data, rental, moveOutPhoto, fallback);
+    } catch (error) {
+      const status = error.response?.status ? ` (${error.response.status})` : "";
+      const detail = error.response?.data?.message || error.response?.data?.error || error.message;
+      console.error(`Rental Roboflow damage-level fallback${status}: ${detail}`);
+    }
+  }
+
+  const huggingFaceModel = process.env.HUGGINGFACE_IMAGE_MODEL;
+  const huggingFaceKey = process.env.HUGGINGFACE_API_KEY;
+  if (huggingFaceModel && huggingFaceKey) {
+    try {
+      const modelUrl = huggingFaceModel.startsWith("http")
+        ? huggingFaceModel
+        : `https://api-inference.huggingface.co/models/${huggingFaceModel}`;
+      const response = await axios.post(
+        modelUrl,
+        Buffer.from(imageDataUriToBase64(moveOutPhoto.image), "base64"),
+        {
+          headers: {
+            Authorization: `Bearer ${huggingFaceKey}`,
+            "Content-Type": "application/octet-stream",
+          },
+          timeout: 30000,
+        }
+      );
+      return parseDamageModelResult(response.data, rental, moveOutPhoto, fallback);
+    } catch (error) {
+      console.error("Rental HuggingFace comparison fallback:", error.message);
+    }
+  }
+
+  return null;
+}
+
+async function analyzeRentalPairWithConfiguredTextModel(rental, moveInPhoto, moveOutPhoto, fallback) {
+  if (!aiApiKey || !openai) return null;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: AI_MODEL,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            "You are Zelcor's rental checkout comparison model.",
+            "Classify the move-out item as PRE_EXISTING, WEAR_TEAR, or DAMAGE and estimate a fair deduction.",
+            "Use strict JSON with keys: status, deduction, confidence, notes.",
+            "Rules: identical hashes mean PRE_EXISTING with deduction 0. Normal ageing is WEAR_TEAR with deduction 0. New broken/cracked/stained/leaking items are DAMAGE.",
+            `Deposit amount: ${rental.depositAmount}. Owner bond: ${rental.ownerBondAmount}.`,
+            `Move-in evidence: ${JSON.stringify({
+              label: moveInPhoto?.label || null,
+              filename: moveInPhoto?.filename || null,
+              hash: moveInPhoto?.hash || null,
+              timestamp: moveInPhoto?.timestamp || null,
+            })}.`,
+            `Move-out evidence: ${JSON.stringify({
+              label: moveOutPhoto.label,
+              filename: moveOutPhoto.filename,
+              hash: moveOutPhoto.hash,
+              timestamp: moveOutPhoto.timestamp,
+            })}.`,
+            `Deterministic baseline: ${JSON.stringify(fallback)}.`,
+          ].join(" "),
+        },
+      ],
+    });
+
+    const parsed = JSON.parse(response.choices?.[0]?.message?.content || "{}");
+    return {
+      status: normalizeAiStatus(parsed.status),
+      deduction: clampDeduction(parsed.deduction, fallback.deduction),
+      confidence: Number(parsed.confidence || fallback.confidence || 0.8),
+      notes: parsed.notes || fallback.notes,
+      modelSource: AI_MODEL,
+    };
+  } catch (error) {
+    console.error("Rental configured text model fallback:", error.message);
+    return null;
+  }
+}
+
+async function analyzeRentalPairWithAi(rental, moveInPhoto, moveOutPhoto, fallback) {
+  const configuredModelResult = await analyzeRentalPairWithConfiguredImageModel(rental, moveOutPhoto, fallback);
+  if (configuredModelResult) return configuredModelResult;
+
+  const canUseVisionModel = process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "test-key";
+  if (!canUseVisionModel || !openai) {
+    const textModelResult = await analyzeRentalPairWithConfiguredTextModel(rental, moveInPhoto, moveOutPhoto, fallback);
+    return textModelResult || { ...fallback, modelSource: "deterministic-fallback" };
+  }
+
+  try {
+    const prompt = [
+      "You are a rental security deposit inspection assistant.",
+      "Compare the move-in and move-out evidence and return strict JSON only.",
+      "Allowed status values: PRE_EXISTING, WEAR_TEAR, DAMAGE.",
+      "PRE_EXISTING and WEAR_TEAR should have deduction 0 unless a repair is clearly justified.",
+      `Deposit amount: ${rental.depositAmount}.`,
+      `Inspection label: ${moveOutPhoto.label}.`,
+    ].join(" ");
+
+    const response = await openai.chat.completions.create({
+      model: AI_MODEL,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            ...(moveInPhoto?.image
+              ? [{ type: "image_url", image_url: { url: moveInPhoto.image } }]
+              : []),
+            { type: "image_url", image_url: { url: moveOutPhoto.image } },
+          ],
+        },
+      ],
+    });
+
+    const parsed = JSON.parse(response.choices?.[0]?.message?.content || "{}");
+    return {
+      status: normalizeAiStatus(parsed.status),
+      deduction: Math.max(0, rentalMoney(parsed.deduction)),
+      confidence: Number(parsed.confidence || fallback.confidence || 0.8),
+      notes: parsed.notes || fallback.notes,
+      modelSource: "openai-vision",
+    };
+  } catch (error) {
+    console.error("Rental AI analysis fallback:", error.message);
+    const textModelResult = await analyzeRentalPairWithConfiguredTextModel(rental, moveInPhoto, moveOutPhoto, fallback);
+    return textModelResult || { ...fallback, modelSource: "deterministic-fallback" };
+  }
+}
+
+function preloadRentalDemoData() {
+  const demo = rentalFromInput({
+    id: "rental_demo_maple",
+    propertyAddress: "A-1204, Maple Residency, Pune",
+    tenantName: "Riya Sharma",
+    landlordName: "Arjun Mehta",
+    depositAmount: 100000,
+    moveInDate: "2026-01-10",
+    status: "READY",
+  });
+
+  rentalDemoStore.rentalsById[demo.id] = demo;
+  rentalDemoStore.rentalOrder = [demo.id];
+  rentalDemoStore.photosByRentalId[demo.id] = [];
+}
+
+preloadRentalDemoData();
+
+function getRentalBundle(rentalId) {
+  updateOverdueSettlement(rentalId);
+  return {
+    rental: rentalDemoStore.rentalsById[rentalId] || null,
+    photos: rentalDemoStore.photosByRentalId[rentalId] || [],
+    analysis: rentalDemoStore.analysesByRentalId[rentalId] || null,
+    settlement: rentalDemoStore.settlementsByRentalId[rentalId] || null,
+  };
+}
+
+function buildRentalSummary() {
+  for (const id of rentalDemoStore.rentalOrder) updateOverdueSettlement(id);
+
+  const rentals = rentalDemoStore.rentalOrder
+    .map((id) => rentalDemoStore.rentalsById[id])
+    .filter(Boolean);
+
+  return rentals.reduce(
+    (summary, rental) => {
+      const analysis = rentalDemoStore.analysesByRentalId[rental.id];
+      const settlement = rentalDemoStore.settlementsByRentalId[rental.id];
+      summary.totalRentals += 1;
+      summary.activeRentals += rental.status === "ACTIVE" ? 1 : 0;
+      summary.completedRentals += rental.status === "COMPLETED" ? 1 : 0;
+      summary.totalDeposit += Number(rental.depositAmount || 0);
+      summary.ownerBondHeld += Number(rental.ownerBondAmount || 0);
+      summary.totalDeduction += Number(analysis?.totalDeduction || settlement?.totalDeduction || 0);
+      summary.totalRefund += Number(analysis?.refund || settlement?.refund || 0);
+      summary.tenantWalletBalance += Number(rental.tenantWalletBalance || 0);
+      return summary;
+    },
+    {
+      totalRentals: 0,
+      activeRentals: 0,
+      completedRentals: 0,
+      totalDeposit: 0,
+      ownerBondHeld: 0,
+      totalDeduction: 0,
+      totalRefund: 0,
+      tenantWalletBalance: 0,
+    }
+  );
+}
+
+function startOwnerReviewClock(rental) {
+  if (rental.reviewStartedAt && rental.reviewDeadline) return;
+  const reviewStartedAt = new Date().toISOString();
+  rental.reviewStartedAt = reviewStartedAt;
+  rental.reviewDeadline = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function createOwnerReviewSettlement(rental, analysis) {
+  startOwnerReviewClock(rental);
+  const ownerDueAmount = analysis.refund;
+  const bondDeductionAmount = Math.min(rental.ownerBondAmount, ownerDueAmount);
+  return {
+    id: `settlement_${Date.now()}`,
+    rentalId: rental.id,
+    status: "OWNER_REVIEW",
+    ownerPaymentStatus: "PENDING",
+    transferStatus: "AWAITING_OWNER_PAYMENT",
+    deposit: rental.depositAmount,
+    ownerBondAmount: rental.ownerBondAmount,
+    totalDeduction: analysis.totalDeduction,
+    refund: analysis.refund,
+    ownerDueAmount,
+    bondDeductionAmount,
+    shortfallAmount: rentalMoney(Math.max(0, ownerDueAmount - bondDeductionAmount)),
+    reviewStartedAt: rental.reviewStartedAt,
+    reviewDeadline: rental.reviewDeadline,
+    tenantWalletCredited: false,
+    tenantWalletCreditAmount: 0,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function updateOverdueSettlement(rentalId, force = false) {
+  const settlement = rentalDemoStore.settlementsByRentalId[rentalId];
+  const rental = rentalDemoStore.rentalsById[rentalId];
+  if (!settlement || !rental || settlement.status !== "OWNER_REVIEW") return settlement;
+  if (!force && Date.now() <= new Date(settlement.reviewDeadline).getTime()) return settlement;
+
+  settlement.status = "AUTO_DEDUCTED";
+  settlement.ownerPaymentStatus = "OVERDUE";
+  settlement.transferStatus = "CREDITED_TO_TENANT_WALLET";
+  settlement.autoDeductedAt = new Date().toISOString();
+  settlement.transferredToTenant = settlement.bondDeductionAmount;
+  settlement.tenantWalletCredited = true;
+  settlement.tenantWalletCreditAmount = settlement.bondDeductionAmount;
+  settlement.tenantWalletCreditedAt = new Date().toISOString();
+  rental.ownerBondAmount = rentalMoney(Math.max(0, rental.ownerBondAmount - settlement.bondDeductionAmount));
+  rental.ownerBondStatus = rental.ownerBondAmount > 0 ? "PARTIALLY_DEDUCTED" : "DEDUCTED";
+  rental.tenantWalletBalance = rentalMoney(Number(rental.tenantWalletBalance || 0) + settlement.bondDeductionAmount);
+  rental.status = "COMPLETED";
+  return settlement;
+}
+
+function saveRentalPhotos(rentalId, phase, photos) {
+  const prepared = photos.map((photo, index) => {
+    const image = photo.image || photo.content || photo.url;
+    return {
+      id: `photo_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`,
+      rentalId,
+      phase,
+      label: photo.label || "General",
+      image,
+      hash: sha256(image),
+      timestamp: photo.timestamp || new Date().toISOString(),
+      filename: photo.filename || `inspection-${index + 1}.jpg`,
+    };
+  });
+
+  rentalDemoStore.photosByRentalId[rentalId] = [
+    ...(rentalDemoStore.photosByRentalId[rentalId] || []).filter((photo) => photo.phase !== phase),
+    ...prepared,
+  ];
+
+  return prepared;
+}
+
+// Public runtime config for frontend (safe values only)
+app.get("/api/public-config", (req, res) => {
+  res.json({
+    supabaseUrl: process.env.SUPABASE_URL || "",
+    supabaseAnonKey: process.env.SUPABASE_ANON_KEY || "",
+  });
+});
+
+app.get("/rental-api/rentals", (_req, res) => {
+  const rentals = rentalDemoStore.rentalOrder
+    .map((id) => rentalDemoStore.rentalsById[id])
+    .filter(Boolean);
+
+  res.json({ success: true, rentals, summary: buildRentalSummary() });
+});
+
+app.get("/rental-api/rentals/:id", (req, res) => {
+  const bundle = getRentalBundle(req.params.id);
+  if (!bundle.rental) return res.status(404).json({ success: false, error: "Rental not found." });
+  res.json({ success: true, ...bundle });
+});
+
+app.post("/rental-api/rentals", (req, res) => {
+  const rental = rentalFromInput(req.body || {});
+  if (!rental.propertyAddress || !rental.tenantName || !rental.landlordName || !rental.depositAmount || !rental.moveInDate) {
+    return res.status(400).json({ success: false, error: "Property address, tenant, landlord, deposit, and move-in date are required." });
+  }
+
+  rentalDemoStore.rentalsById[rental.id] = rental;
+  rentalDemoStore.rentalOrder.unshift(rental.id);
+  rentalDemoStore.photosByRentalId[rental.id] = [];
+  rentalDemoStore.analysesByRentalId[rental.id] = null;
+  rentalDemoStore.settlementsByRentalId[rental.id] = null;
+
+  res.json({ success: true, rental });
+});
+
+app.post("/rental-api/rentals/:id/inspection", (req, res) => {
+  const rental = rentalDemoStore.rentalsById[req.params.id];
+  if (!rental) return res.status(404).json({ success: false, error: "Rental not found." });
+
+  const { phase, photos } = req.body || {};
+  if (!["move-in", "move-out"].includes(phase) || !Array.isArray(photos) || photos.length === 0) {
+    return res.status(400).json({ success: false, error: "phase and photos[] are required." });
+  }
+
+  const prepared = saveRentalPhotos(rental.id, phase, photos);
+  if (phase === "move-in") rental.status = "ACTIVE";
+  if (phase === "move-out") {
+    rental.status = "READY";
+    startOwnerReviewClock(rental);
+  }
+  rentalDemoStore.analysesByRentalId[rental.id] = null;
+  rentalDemoStore.settlementsByRentalId[rental.id] = null;
+
+  res.json({ success: true, rental, photos: prepared });
+});
+
+app.post("/rental-api/rentals/:id/analyze", async (req, res) => {
+  const rental = rentalDemoStore.rentalsById[req.params.id];
+  if (!rental) return res.status(404).json({ success: false, error: "Rental not found." });
+
+  const photos = rentalDemoStore.photosByRentalId[rental.id] || [];
+  const moveIns = photos.filter((photo) => photo.phase === "move-in");
+  const moveOuts = photos.filter((photo) => photo.phase === "move-out");
+  if (!moveIns.length || !moveOuts.length) {
+    return res.status(400).json({ success: false, error: "Move-in and move-out photos are required before analysis." });
+  }
+
+  const reports = [];
+  const usedMoveInIds = new Set();
+  for (const moveOutPhoto of moveOuts) {
+    const normalizedMoveOut = normalizeRentalLabel(moveOutPhoto.label);
+    const moveInPhoto =
+      moveIns.find((photo) => !usedMoveInIds.has(photo.id) && normalizeRentalLabel(photo.label) === normalizedMoveOut) ||
+      moveIns.find((photo) => !usedMoveInIds.has(photo.id) && normalizeRentalLabel(photo.label) && normalizedMoveOut.includes(normalizeRentalLabel(photo.label))) ||
+      moveIns.find((photo) => !usedMoveInIds.has(photo.id)) ||
+      null;
+    if (moveInPhoto) usedMoveInIds.add(moveInPhoto.id);
+    const fallback = scoreRentalPair(rental, moveInPhoto, moveOutPhoto);
+    const result = await analyzeRentalPairWithAi(rental, moveInPhoto, moveOutPhoto, fallback);
+    reports.push({
+      id: `report_${moveOutPhoto.id}`,
+      label: moveOutPhoto.label,
+      moveInPhotoId: moveInPhoto?.id || null,
+      moveOutPhotoId: moveOutPhoto.id,
+      status: result.status,
+      deduction: rentalMoney(result.deduction),
+      confidence: result.confidence,
+      notes: result.notes,
+      modelSource: result.modelSource || "deterministic-fallback",
+    });
+  }
+
+  const totalDeduction = Math.min(
+    rental.depositAmount,
+    reports.reduce((sum, report) => sum + Number(report.deduction || 0), 0)
+  );
+
+  const analysis = {
+    id: `rental_analysis_${Date.now()}`,
+    rentalId: rental.id,
+    createdAt: new Date().toISOString(),
+    reports,
+    totalDeduction,
+    refund: rentalMoney(rental.depositAmount - totalDeduction),
+    model: reports.find((report) => report.modelSource !== "deterministic-fallback")?.modelSource || "deterministic-fallback",
+  };
+  rentalDemoStore.analysesByRentalId[rental.id] = analysis;
+  rentalDemoStore.settlementsByRentalId[rental.id] = createOwnerReviewSettlement(rental, analysis);
+  updateOverdueSettlement(rental.id);
+
+  res.json({ success: true, analysis, settlement: rentalDemoStore.settlementsByRentalId[rental.id] });
+});
+
+app.post("/rental-api/rentals/:id/owner-payment", (req, res) => {
+  const rental = rentalDemoStore.rentalsById[req.params.id];
+  if (!rental) return res.status(404).json({ success: false, error: "Rental not found." });
+
+  const settlement = rentalDemoStore.settlementsByRentalId[rental.id];
+  if (!settlement) return res.status(400).json({ success: false, error: "Run analysis before marking payment." });
+  if (settlement.status !== "OWNER_REVIEW") {
+    return res.status(400).json({ success: false, error: "Owner review is no longer pending." });
+  }
+
+  settlement.status = "OWNER_PAID";
+  settlement.ownerPaymentStatus = "PAID";
+  settlement.transferStatus = "PAID_DIRECTLY_BY_OWNER";
+  settlement.ownerPaidAt = new Date().toISOString();
+  settlement.transferredToTenant = settlement.ownerDueAmount;
+  rental.status = "COMPLETED";
+
+  res.json({ success: true, rental, settlement });
+});
+
+app.post("/rental-api/rentals/:id/auto-deduct", (req, res) => {
+  const rental = rentalDemoStore.rentalsById[req.params.id];
+  if (!rental) return res.status(404).json({ success: false, error: "Rental not found." });
+
+  const settlement = rentalDemoStore.settlementsByRentalId[rental.id];
+  if (!settlement) return res.status(400).json({ success: false, error: "Run analysis before auto deduction." });
+  if (settlement.status !== "OWNER_REVIEW") {
+    return res.status(400).json({ success: false, error: "Owner review is no longer pending." });
+  }
+  if (Date.now() <= new Date(settlement.reviewDeadline).getTime() && !req.body?.force) {
+    return res.status(400).json({ success: false, error: "The 2-day owner review period is still active." });
+  }
+
+  const updated = updateOverdueSettlement(rental.id, true);
+  res.json({ success: true, rental, settlement: updated });
+});
+
+app.post("/rental-api/rentals/:id/resolve", (req, res) => {
+  const rental = rentalDemoStore.rentalsById[req.params.id];
+  if (!rental) return res.status(404).json({ success: false, error: "Rental not found." });
+
+  const { action } = req.body || {};
+  if (action !== "dispute") {
+    return res.status(400).json({ success: false, error: "action must be dispute." });
+  }
+
+  const analysis = rentalDemoStore.analysesByRentalId[rental.id];
+  if (!analysis) return res.status(400).json({ success: false, error: "Run analysis before resolving." });
+
+  const settlement = {
+    id: `settlement_${Date.now()}`,
+    rentalId: rental.id,
+    action,
+    status: "DISPUTED",
+    ownerPaymentStatus: "ON_HOLD",
+    transferStatus: "SENT_TO_REVIEW",
+    deposit: rental.depositAmount,
+    ownerBondAmount: rental.ownerBondAmount,
+    totalDeduction: analysis.totalDeduction,
+    refund: analysis.refund,
+    createdAt: new Date().toISOString(),
+  };
+  rentalDemoStore.settlementsByRentalId[rental.id] = settlement;
+  rental.status = "COMPLETED";
+
+  res.json({ success: true, rental, settlement });
+});
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";

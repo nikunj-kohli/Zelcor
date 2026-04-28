@@ -14,10 +14,10 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import ZelcorShop from './pages/ZelcorShop';
 import Insurance from './pages/Insurance';
-import Rental from './pages/Rental';
 import EdTech from './pages/EdTech';
 import Hospital from './pages/Hospital';
 import PaymentSuccess from './pages/PaymentSuccess';
+import RentalDemo from './pages/RentalDemo';
 
 
 function App() {
@@ -63,10 +63,11 @@ function App() {
       <Route path="/shop" element={<ZelcorShop />} />
       <Route path="/payment-success" element={<PaymentSuccess />} />
       <Route path="/support" element={<Support />} />
+      <Route path="/rental-demo" element={<RentalDemo />} />
       
       {/* Industry Routes */}
       <Route path="/insurance" element={session ? <Insurance /> : <Navigate to="/auth" />} />
-      <Route path="/rental" element={session ? <Rental /> : <Navigate to="/auth" />} />
+      <Route path="/rental" element={session ? <RentalDemo /> : <Navigate to="/auth" />} />
       <Route path="/edtech" element={session ? <EdTech /> : <Navigate to="/auth" />} />
       <Route path="/hospital" element={session ? <Hospital /> : <Navigate to="/auth" />} />
 
