@@ -39,11 +39,37 @@ CREATE TABLE IF NOT EXISTS disputes (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 4. INSURANCE CLAIMS
-CREATE TABLE IF NOT EXISTS insurance_claims (
+-- 4. INSURANCE POLICIES
+CREATE TABLE IF NOT EXISTS insurance_policies (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL, -- 'health', 'vehicle', 'life', etc.
+  subtype TEXT, -- 'full_body', 'body_parts', 'comprehensive', etc.
+  description TEXT,
+  coverage_amount NUMERIC NOT NULL,
+  premium_amount NUMERIC NOT NULL,
+  duration_months INTEGER NOT NULL,
+  terms TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 5. INSURANCE PURCHASES
+CREATE TABLE IF NOT EXISTS insurance_purchases (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES profiles(id) NOT NULL,
-  insurer_id UUID REFERENCES profiles(id) NOT NULL,
+  policy_id UUID REFERENCES insurance_policies(id) NOT NULL,
+  purchase_date TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  expiry_date TIMESTAMP WITH TIME ZONE NOT NULL,
+  razorpay_order_id TEXT,
+  razorpay_payment_id TEXT,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'expired', 'cancelled'))
+);
+
+-- 6. INSURANCE CLAIMS
+CREATE TABLE IF NOT EXISTS insurance_claims (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  purchase_id UUID REFERENCES insurance_purchases(id) NOT NULL,
+  user_id UUID REFERENCES profiles(id) NOT NULL,
   claim_amount NUMERIC NOT NULL,
   diagnosis TEXT NOT NULL,
   urgency TEXT DEFAULT 'normal' CHECK (urgency IN ('normal', 'critical', 'emergency')),

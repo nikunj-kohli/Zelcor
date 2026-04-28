@@ -279,8 +279,8 @@ const ZelcorShop = () => {
   return (
     <div className="bg-white min-h-screen font-body-lg relative overflow-x-hidden">
       {/* Header */}
-      <header className="h-20 border-b border-slate-100 flex items-center justify-between px-10 sticky top-0 bg-white/90 backdrop-blur-md z-50">
-        <div className="flex items-center gap-10">
+      <header className="min-h-20 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-10 sticky top-0 bg-white/90 backdrop-blur-md z-50">
+        <div className="flex min-w-0 items-center gap-4 lg:gap-10">
           <div className="text-2xl font-black tracking-tighter text-slate-900 flex items-center gap-2 cursor-pointer" onClick={() => navigate('/dashboard')}>
             <span className="material-symbols-outlined text-primary">verified_user</span>
             Zelcor Shop
@@ -291,7 +291,7 @@ const ZelcorShop = () => {
             <span>Protection Plans</span>
           </nav>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-3 sm:gap-6">
            <button onClick={() => setShowCart(true)} className="relative p-2 hover:bg-slate-50 rounded-xl transition-all">
               <span className="material-symbols-outlined text-slate-600">shopping_cart</span>
               {cart.length > 0 && (
@@ -355,13 +355,13 @@ const ZelcorShop = () => {
       </div>
 
       {/* Main Content */}
-      <main className="max-w-[1200px] mx-auto p-12 space-y-12">
+      <main className="max-w-[1200px] mx-auto p-4 sm:p-6 lg:p-12 space-y-8 lg:space-y-12">
         {/* Amazon Import Section */}
-        <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-12 rounded-[48px] text-white relative overflow-hidden shadow-2xl shadow-slate-200">
+        <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-6 sm:p-8 lg:p-12 rounded-[28px] sm:rounded-[48px] text-white relative overflow-hidden shadow-2xl shadow-slate-200">
           <div className="relative z-10 space-y-6 max-w-[600px]">
              <span className="px-3 py-1 bg-primary text-white rounded-full text-[10px] font-black uppercase tracking-[0.2em]">Import from Amazon</span>
-             <h2 className="font-h1 text-5xl tracking-tight leading-none">Paste any Amazon link to buy with Escrow protection.</h2>
-             <div className="flex gap-2 bg-white/10 p-2 rounded-2xl backdrop-blur-md border border-white/10 focus-within:border-primary/50 transition-all">
+             <h2 className="font-h1 text-3xl sm:text-5xl tracking-tight leading-tight sm:leading-none">Paste any Amazon link to buy with Escrow protection.</h2>
+             <div className="flex flex-col sm:flex-row gap-2 bg-white/10 p-2 rounded-2xl backdrop-blur-md border border-white/10 focus-within:border-primary/50 transition-all">
                 <input 
                   type="text" 
                   value={amazonLink}
@@ -394,7 +394,7 @@ const ZelcorShop = () => {
         {/* Scanned Product Display */}
         {scannedProduct && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <div className="flex flex-col md:flex-row gap-12 bg-slate-50 p-8 rounded-[40px] items-center border-2 border-primary/20">
+             <div className="flex flex-col md:flex-row gap-6 lg:gap-12 bg-slate-50 p-5 sm:p-8 rounded-[28px] sm:rounded-[40px] items-center border-2 border-primary/20">
                 <div className="w-full md:w-1/3 aspect-square bg-white rounded-[32px] overflow-hidden shadow-lg">
                   <img 
                     src={scannedProduct.image} 
@@ -409,9 +409,9 @@ const ZelcorShop = () => {
                 <div className="flex-1 space-y-6 text-center md:text-left">
                    <div className="space-y-2">
                       <span className="text-primary font-black text-xs uppercase tracking-widest">Found on Amazon</span>
-                      <h3 className="font-h2 text-4xl text-slate-900">{scannedProduct.name}</h3>
+                      <h3 className="font-h2 text-2xl sm:text-4xl text-slate-900">{scannedProduct.name}</h3>
                    </div>
-                   <div className="flex items-center justify-center md:justify-start gap-4">
+                   <div className="flex flex-wrap items-center justify-center md:justify-start gap-4">
                       <p className="font-black text-4xl text-slate-900">₹{scannedProduct.price.toLocaleString()}</p>
                       <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-[10px] font-black uppercase">Verified Price</span>
                    </div>
@@ -439,10 +439,10 @@ const ZelcorShop = () => {
               <div className="flex justify-between items-center">
                  <h3 className="font-h3 text-2xl text-slate-800 tracking-tight text-center md:text-left">Popular Marketplace</h3>
               </div>
-              <div className="grid md:grid-cols-4 gap-8">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-8">
                 {products.map((p) => (
                   <div key={p.id} className="group flex flex-col">
-                    <div className="aspect-square bg-slate-50 rounded-[40px] overflow-hidden mb-4 relative border border-slate-100 group-hover:border-primary/20 transition-all">
+                    <div className="aspect-square bg-slate-50 rounded-[28px] sm:rounded-[40px] overflow-hidden mb-4 relative border border-slate-100 group-hover:border-primary/20 transition-all">
                       <img src={p.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={p.name} />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-all"></div>
                       <button 

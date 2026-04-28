@@ -22,17 +22,23 @@ const Auth = () => {
     }
   };
 
+  // Demo Login
+  const handleDemoLogin = () => {
+    localStorage.setItem('zelcor_demo_id', '11111111-1111-1111-1111-111111111111');
+    window.location.href = '/dashboard';
+  };
+
   return (
-    <div className="bg-[#f8f9fc] min-h-screen flex items-center justify-center p-6 mesh-gradient relative overflow-hidden font-body-lg">
+    <div className="bg-[#f8f9fc] min-h-screen flex items-center justify-center p-4 sm:p-6 mesh-gradient relative overflow-hidden font-body-lg">
       {/* Decorative Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-[120px]"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-secondary/5 rounded-full blur-[120px]"></div>
 
-      <div className="bg-white w-full max-w-[440px] p-12 rounded-[48px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] relative z-10 border border-slate-100">
-        <div className="text-center space-y-3 mb-12">
-          <div className="text-5xl font-black tracking-tighter text-primary">zelcor</div>
+      <div className="bg-white w-full max-w-[440px] p-6 sm:p-10 lg:p-12 rounded-[28px] sm:rounded-[48px] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] relative z-10 border border-slate-100">
+        <div className="text-center space-y-3 mb-8 sm:mb-12">
+          <div className="text-4xl sm:text-5xl font-black tracking-tighter text-primary">zelcor</div>
           <h2 className="font-h2 text-2xl tracking-tighter text-slate-900">Secure the Trust</h2>
-          <p className="text-sm text-slate-400 font-medium px-8">The decentralized escrow protocol for the next billion users.</p>
+          <p className="text-sm text-slate-400 font-medium sm:px-8">The decentralized escrow protocol for the next billion users.</p>
         </div>
 
         <div className="space-y-4">
@@ -50,6 +56,14 @@ const Auth = () => {
               </>
             )}
           </button>
+
+          <button 
+            onClick={handleDemoLogin}
+            className="w-full py-4 bg-slate-50 border-2 border-slate-100 rounded-[20px] flex items-center justify-center gap-4 font-bold text-slate-500 hover:bg-slate-100 hover:border-slate-200 transition-all active:scale-[0.98]"
+          >
+            <span className="material-symbols-outlined text-sm">rocket_launch</span>
+            Explore as Demo User
+          </button>
         </div>
 
         <div className="mt-12 text-center">
@@ -60,7 +74,7 @@ const Auth = () => {
       </div>
       
       {/* Footer Branding */}
-      <div className="absolute bottom-8 text-slate-300 text-[10px] font-bold uppercase tracking-[0.3em]">
+      <div className="absolute bottom-4 sm:bottom-8 px-4 text-center text-slate-300 text-[10px] font-bold uppercase tracking-[0.2em] sm:tracking-[0.3em]">
         Encrypted • Decentralized • Immutable
       </div>
     </div>

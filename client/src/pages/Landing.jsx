@@ -93,17 +93,17 @@ const Landing = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6">
               {[
-                { name: 'Insurance', icon: 'shield', hold: '2-5% Security Bond' },
-                { name: 'Ecommerce', icon: 'shopping_cart', hold: '100% Escrow' },
-                { name: 'Rentals', icon: 'apartment', hold: '50% Security Deposit' },
-                { name: 'Edtech', icon: 'school', hold: '100% Escrow' },
-                { name: 'Hospitals', icon: 'medical_services', hold: '30% Package Amount' }
+                { name: 'Ecommerce', icon: 'shopping_cart', hold: '100% Escrow', link: '/shop' },
+                { name: 'Rentals', icon: 'apartment', hold: '50% Security Deposit', link: '/rental' },
+                { name: 'Edtech', icon: 'school', hold: '100% Escrow', link: '/edtech' },
+                { name: 'Hospitals', icon: 'medical_services', hold: '30% Package Amount', link: '/hospital' },
+                { name: 'Insurance', icon: 'health_and_safety', hold: 'AI Claim Analysis', link: '/insurance' }
               ].map((ind) => (
-                <div key={ind.name} className="p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] bg-white border border-slate-100 hover:border-primary hover:shadow-xl transition-all cursor-pointer group text-center">
+                <a key={ind.name} href={ind.link || '#'} className="p-6 sm:p-8 rounded-[24px] sm:rounded-[32px] bg-white border border-slate-100 hover:border-primary hover:shadow-xl transition-all cursor-pointer group text-center block">
                   <span className="material-symbols-outlined text-4xl text-slate-400 group-hover:text-primary mb-4 transition-colors">{ind.icon}</span>
                   <h4 className="font-h3 text-lg mb-2">{ind.name}</h4>
                   <p className="text-[10px] font-bold text-primary uppercase tracking-widest">{ind.hold}</p>
-                </div>
+                </a>
               ))}
             </div>
           </div>

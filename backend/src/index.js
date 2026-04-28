@@ -8,6 +8,7 @@ import * as cheerio from "cheerio";
 import { ethers } from "ethers";
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
+import insuranceRoutes from "./routes/insurance.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -18,6 +19,8 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+app.use("/api/insurance", insuranceRoutes);
 
 // Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || "";
@@ -136,6 +139,35 @@ async function resolveSellerId(preferredSellerId, buyerId) {
   }
 
   throw new Error("No valid seller profile found for escrow creation");
+}
+
+async function resolveCounterpartyProfileId(preferredProfileId, fallbackProfileId, label = "counterparty") {
+  const preferredProfile = await getProfileById(preferredProfileId);
+  if (preferredProfile) {
+    return preferredProfile.id;
+  }
+
+  const { data: enterpriseProfile, error: enterpriseError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("is_enterprise", true)
+    .limit(1)
+    .maybeSingle();
+
+  if (enterpriseError) {
+    throw enterpriseError;
+  }
+
+  if (enterpriseProfile?.id) {
+    return enterpriseProfile.id;
+  }
+
+  const fallbackProfile = await getProfileById(fallbackProfileId);
+  if (fallbackProfile) {
+    return fallbackProfile.id;
+  }
+
+  throw new Error(`No valid ${label} profile found. Create a profile first, then retry.`);
 }
 
 function normalizeAmazonUrl(rawUrl) {
@@ -918,64 +950,42 @@ Return only valid JSON.`
   return prompts[industry] || prompts.ecommerce;
 }
 
+function getInsuranceUrgencyPrompt(data) {
+  return `You are a medical insurance urgency triage assistant for Zelcor, a blockchain-based escrow platform.
+Analyze the insurance claim context and return only JSON. Do not approve or reject the claim. Your task is urgency detection and review prioritization.
+{
+  "is_valid": true,
+  "urgency": "normal|critical|emergency",
+  "diagnosis_keywords": ["keyword1", "keyword2"],
+  "confidence_score": 0-100,
+  "recommended_deadline_hours": number,
+  "reason": "short explanation for the urgency",
+  "red_flags": ["flag1", "flag2"],
+  "missing_info": ["document or detail needed"],
+  "suggested_action": "standard_review|prioritize_review|immediate_review|request_info"
+}
+
+Urgency guide:
+- emergency: immediate life-threatening or time-sensitive situations such as stroke, heart attack, ICU, ventilator, sepsis, severe accident, emergency surgery.
+- critical: serious high-risk conditions such as cancer treatment, organ failure, transplant, major surgery, high-value hospitalization, neonatal ICU, dialysis.
+- normal: routine claims, OPD, planned non-critical care, low-risk follow-up.
+
+Claim Data:
+- Diagnosis: ${data.diagnosis || "N/A"}
+- Symptoms: ${data.symptoms || "N/A"}
+- Admission Type: ${data.admission_type || "N/A"}
+- Treatment Type: ${data.treatment_type || "N/A"}
+- Hospital: ${data.hospital_name || "N/A"}
+- Claim Amount: INR ${data.claim_amount || "N/A"}
+- Policy Document: ${data.policy_document_url || "N/A"}
+- Doctor Note: ${data.doctor_note || "N/A"}
+
+Return only valid JSON.`;
+}
+
 // ===================
 // INSURANCE ROUTES
 // ===================
-
-app.post("/api/insurance/claim", async (req, res) => {
-  try {
-    const { user_id, insurer_id, claim_amount, diagnosis, policy_document_url } = req.body;
-
-    // AI Analyze urgency
-    const aiResult = await classifyInsuranceClaim(diagnosis, claim_amount);
-    
-    // Create claim in database
-    const { data: claim, error } = await supabase
-      .from("insurance_claims")
-      .insert([{
-        user_id,
-        insurer_id,
-        claim_amount,
-        diagnosis,
-        urgency: aiResult.urgency,
-        deadline_hours: aiResult.recommended_deadline_hours,
-        status: "ai_reviewed",
-        ai_analysis: aiResult
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // Blockchain hash
-    const policyHash = generateBlockchainHash(policy_document_url || claim.id);
-    
-    res.json({ 
-      success: true, 
-      claim: { ...claim, policy_hash: policyHash },
-      aiResult 
-    });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
-  }
-});
-
-app.get("/api/insurance/claims", async (req, res) => {
-  try {
-    const { user_id, insurer_id } = req.query;
-    
-    let query = supabase.from("insurance_claims").select("*");
-    if (user_id) query = query.eq("user_id", user_id);
-    if (insurer_id) query = query.eq("insurer_id", insurer_id);
-    
-    const { data, error } = await query.order("created_at", { ascending: false });
-    if (error) throw error;
-    
-    res.json({ success: true, claims: data });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
-  }
-});
 
 // Get all rental agreements (for demo)
 app.get("/api/rental/agreements", async (req, res) => {
@@ -1017,33 +1027,6 @@ app.get("/api/hospital/admissions", async (req, res) => {
     
     if (error) throw error;
     res.json({ success: true, admissions: data });
-  } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
-  }
-});
-
-app.post("/api/insurance/respond", async (req, res) => {
-  try {
-    const { claim_id, action } = req.body;
-    
-    const { data: claim, error } = await supabase
-      .from("insurance_claims")
-      .update({ 
-        status: action === "approve" ? "approved" : action === "reject" ? "rejected" : "pending_info",
-        insurer_response_at: new Date().toISOString()
-      })
-      .eq("id", claim_id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    
-    // Trigger penalty if critical and no response
-    if (claim.urgency === "critical") {
-      // Schedule penalty check job
-    }
-    
-    res.json({ success: true, claim });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }
@@ -1406,24 +1389,149 @@ app.post("/api/hospital/pay", async (req, res) => {
 // INDUSTRY HELPER FUNCTIONS
 // ===================
 
-async function classifyInsuranceClaim(diagnosis, amount) {
-  const prompt = getIndustryPrompt("insurance", { diagnosis, claimAmount: amount });
-  
+function clampScore(value, fallback = 60) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+}
+
+function normalizeInsuranceUrgency(value) {
+  return ["normal", "critical", "emergency"].includes(value) ? value : "normal";
+}
+
+function ruleBasedInsuranceUrgency(context) {
+  const text = [
+    context.diagnosis,
+    context.symptoms,
+    context.admission_type,
+    context.treatment_type,
+    context.doctor_note,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const emergencyWords = [
+    "heart attack",
+    "cardiac arrest",
+    "stroke",
+    "sepsis",
+    "ventilator",
+    "icu",
+    "accident",
+    "trauma",
+    "emergency surgery",
+    "unconscious",
+    "internal bleeding",
+  ];
+
+  const criticalWords = [
+    "cancer",
+    "chemotherapy",
+    "radiation",
+    "kidney failure",
+    "dialysis",
+    "organ transplant",
+    "major surgery",
+    "brain tumor",
+    "neonatal",
+    "bypass",
+  ];
+
+  const matchedEmergency = emergencyWords.filter((word) => text.includes(word));
+  if (matchedEmergency.length > 0) {
+    return {
+      is_valid: true,
+      urgency: "emergency",
+      diagnosis_keywords: matchedEmergency,
+      confidence_score: 92,
+      recommended_deadline_hours: 6,
+      reason: "Emergency indicators were found in the claim details.",
+      red_flags: matchedEmergency,
+      missing_info: [],
+      suggested_action: "immediate_review",
+      source: "rules",
+    };
+  }
+
+  const matchedCritical = criticalWords.filter((word) => text.includes(word));
+  if (matchedCritical.length > 0 || Number(context.claim_amount) >= 500000) {
+    return {
+      is_valid: true,
+      urgency: "critical",
+      diagnosis_keywords: matchedCritical,
+      confidence_score: matchedCritical.length > 0 ? 84 : 72,
+      recommended_deadline_hours: 24,
+      reason: matchedCritical.length > 0
+        ? "Critical medical indicators were found in the claim details."
+        : "The claim amount crosses the high-value review threshold.",
+      red_flags: matchedCritical.length > 0 ? matchedCritical : ["high_value_claim"],
+      missing_info: [],
+      suggested_action: "prioritize_review",
+      source: "rules",
+    };
+  }
+
+  return {
+    is_valid: true,
+    urgency: "normal",
+    diagnosis_keywords: [],
+    confidence_score: 62,
+    recommended_deadline_hours: 720,
+    reason: "No emergency or critical indicators were detected by the rules engine.",
+    red_flags: [],
+    missing_info: [],
+    suggested_action: "standard_review",
+    source: "rules",
+  };
+}
+
+function validateInsuranceAiResult(aiResult, ruleResult) {
+  const urgency = normalizeInsuranceUrgency(aiResult?.urgency || ruleResult.urgency);
+  const deadlineByUrgency = {
+    emergency: 6,
+    critical: 24,
+    normal: 720,
+  };
+
+  return {
+    is_valid: typeof aiResult?.is_valid === "boolean" ? aiResult.is_valid : true,
+    urgency,
+    diagnosis_keywords: Array.isArray(aiResult?.diagnosis_keywords)
+      ? aiResult.diagnosis_keywords.slice(0, 8)
+      : ruleResult.diagnosis_keywords,
+    confidence_score: clampScore(aiResult?.confidence_score, ruleResult.confidence_score),
+    recommended_deadline_hours: Number(aiResult?.recommended_deadline_hours) || deadlineByUrgency[urgency],
+    reason: typeof aiResult?.reason === "string" && aiResult.reason.trim()
+      ? aiResult.reason.trim()
+      : ruleResult.reason,
+    red_flags: Array.isArray(aiResult?.red_flags) ? aiResult.red_flags.slice(0, 8) : ruleResult.red_flags,
+    missing_info: Array.isArray(aiResult?.missing_info) ? aiResult.missing_info.slice(0, 8) : [],
+    suggested_action: ["standard_review", "prioritize_review", "immediate_review", "request_info"].includes(aiResult?.suggested_action)
+      ? aiResult.suggested_action
+      : ruleResult.suggested_action,
+    rule_result: ruleResult,
+    source: "ai_rules_hybrid",
+  };
+}
+
+async function classifyInsuranceClaim(context) {
+  const ruleResult = ruleBasedInsuranceUrgency(context);
+  const prompt = getInsuranceUrgencyPrompt(context);
+
   try {
     const response = await openai.chat.completions.create({
       model: AI_MODEL,
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
     });
-    return JSON.parse(response.choices[0]?.message?.content || "{}");
+    const aiResult = JSON.parse(response.choices[0]?.message?.content || "{}");
+    return validateInsuranceAiResult(aiResult, ruleResult);
   } catch (error) {
     return {
-      is_valid: true,
-      urgency: diagnosis?.toLowerCase().includes("cancer") ? "critical" : "normal",
-      diagnosis_keywords: [],
-      confidence_score: 50,
-      recommended_deadline_hours: diagnosis?.toLowerCase().includes("cancer") ? 24 : 720,
-      suggested_action: "approve"
+      ...ruleResult,
+      ai_error: error.message,
+      source: "rules_fallback",
     };
   }
 }
@@ -1503,6 +1611,16 @@ async function analyzeHospitalBill(admission, finalBill, consents) {
     };
   }
 }
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Backend Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal Server Error',
+    details: err
+  });
+});
 
 // Start server
 app.listen(PORT, () => {
