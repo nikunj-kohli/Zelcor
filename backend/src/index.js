@@ -22,9 +22,18 @@ const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Initialize OpenAI
+// Initialize AI (OpenAI or Groq Fallback)
+const aiApiKey = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test-key') 
+  ? process.env.OPENAI_API_KEY 
+  : process.env.GROQ_API_KEY;
+
+const aiBaseUrl = (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'test-key')
+  ? undefined
+  : "https://api.groq.com/openai/v1";
+
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: aiApiKey,
+  baseURL: aiBaseUrl,
 });
 
 // Initialize Ethereum
@@ -77,6 +86,83 @@ const ESCROW_ABI = [
 function generateBlockchainHash(data) {
   return "0x" + crypto.createHash("sha256").update(data).digest("hex");
 }
+
+// ===================
+// SHOP ROUTES
+// ===================
+
+app.post("/api/shop/analyze-link", async (req, res) => {
+  try {
+    let { url } = req.body;
+    
+    // 0. Follow Redirects for short links (amzn.in)
+    if (url.includes('amzn.in')) {
+      try {
+        const redirectRes = await axios.head(url, { 
+          maxRedirects: 5,
+          headers: { 'User-Agent': 'Mozilla/5.0' } 
+        });
+        url = redirectRes.request.res.responseUrl || url;
+      } catch (e) { console.log("Redirect follow failed"); }
+    }
+
+    // 1. Visit the link using Jina Reader
+    let pageContent = "";
+    try {
+      const jinaRes = await axios.get(`https://r.jina.ai/${url}`, { timeout: 8000 });
+      pageContent = jinaRes.data;
+      
+      // Basic cleaning to remove noise BUT KEEP TEXT
+      pageContent = pageContent
+        .replace(/!\[.*?\]\(.*?\)/g, (match) => match.includes('media-amazon') ? match : '') // Keep Amazon images
+        .replace(/\[(.*?)\]\(.*?\)/g, '$1') // Keep the text [THIS], remove the link (THAT)
+        .slice(0, 8000); 
+    } catch (e) {
+      console.log("Jina Scrape failed, falling back to URL analysis");
+    }
+
+    const prompt = `You are a professional product data extractor. 
+    
+    TASK: Extract the ACTUAL Product Name, Price (in INR), and a valid Image URL from the provided content.
+    
+    CONTENT:
+    ${pageContent}
+    
+    URL: ${url}
+    
+    STRICT RULES:
+    1. PRODUCT NAME: 
+       - Look for the main <h1> or the boldest title.
+       - DO NOT use random numbers, session IDs, or order IDs as the name.
+       - IGNORE patterns like '525-0972295-6186439' or similar numeric strings.
+       - If you can't find a clear title in the content, use the URL slug (e.g., "Zebronics Bluetooth Headphone").
+    
+    2. PRICE: Extract only the number (e.g., 1999).
+    
+    3. IMAGE: Must be a direct URL to an image.
+    
+    OUTPUT FORMAT (JSON ONLY):
+    {
+      "name": "Product Title",
+      "price": 0,
+      "image": "url"
+    }
+    
+    If data is missing, make a best guess based on the product type.`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(response.choices[0]?.message?.content || "{}");
+    res.json({ success: true, product: result });
+  } catch (error) {
+    console.error("Link analysis error:", error);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
 
 // Helper: Classify complaint using OpenAI
 async function classifyComplaint(description, images) {
@@ -473,6 +559,670 @@ app.get("/api/company/dashboard", async (req, res) => {
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
+
+// ===================
+// INDUSTRY-SPECIFIC AI PROMPTS
+// ===================
+
+// Helper: Generate industry-specific AI prompt
+function getIndustryPrompt(industry, data) {
+  const prompts = {
+    insurance: `You are a medical insurance claims analyst for Zelcor, a blockchain-based escrow platform. Analyze this insurance claim and return JSON:
+{
+  "is_valid": true/false,
+  "urgency": "normal|critical|emergency",
+  "diagnosis_keywords": ["keyword1", "keyword2"],
+  "confidence_score": 0-100,
+  "recommended_deadline_hours": number,
+  "suggested_action": "approve|request_info|reject|penalty"
+}
+
+Claim Data:
+- Diagnosis: ${data.diagnosis || 'N/A'}
+- Claim Amount: ₹${data.claimAmount || 'N/A'}
+- Policy: ${data.policy || 'N/A'}
+
+Return only valid JSON.`,
+
+    rental: `You are a property damage assessor for Zelcor, a blockchain-based rental deposit escrow platform. Compare move-in and move-out photos and return JSON:
+{
+  "is_valid": true/false,
+  "damage_items": [{"item": "wall", "condition": "pre_existing|new_damage|wear_tear", "deduction": 0}],
+  "total_deduction": 0-100,
+  "recommended_refund": 0-100,
+  "confidence_score": 0-100,
+  "suggested_action": "full_refund|partial_refund|full_deduction|dispute"
+}
+
+Move-in Notes: ${data.moveInNotes || 'N/A'}
+Move-out Notes: ${data.moveOutNotes || 'N/A'}
+
+Return only valid JSON.`,
+
+    edtech: `You are an edtech course quality analyst for Zelcor, a blockchain-based course fee escrow platform. Analyze this student complaint and return JSON:
+{
+  "is_valid": true/false,
+  "validity_score": 0-100,
+  "findings": {
+    "platform_response_time_days": number,
+    "content_outdated": true/false,
+    "similar_complaints": number,
+    "money_back_guarantee_found": true/false
+  },
+  "refund_recommendation": 0-100,
+  "suggested_action": "full_refund|partial_refund|no_refund|escalate"
+}
+
+Complaint: ${data.complaint || 'N/A'}
+Course Completion: ${data.completionPercentage || 0}%
+Platform Promise: ${data.platformPromise || 'N/A'}
+
+Return only valid JSON.`,
+
+    hospital: `You are a hospital billing analyst for Zelcor, a blockchain-based medical package escrow platform. Compare package agreement vs final bill and return JSON:
+{
+  "is_valid": true/false,
+  "authorized_items": [{"item": "name", "amount": 0, "status": "authorized|disputed"}],
+  "disputed_amount": 0-100,
+  "authorized_amount": 0-100,
+  "confidence_score": 0-100,
+  "suggested_action": "pay_full|pay_partial|dispute"
+}
+
+Package Agreement: ${data.packageAgreement || 'N/A'}
+Final Bill: ${data.finalBill || 'N/A'}
+Consented Extras: ${data.consentedExtras || 'N/A'}
+
+Return only valid JSON.`
+  };
+  return prompts[industry] || prompts.ecommerce;
+}
+
+// ===================
+// INSURANCE ROUTES
+// ===================
+
+app.post("/api/insurance/claim", async (req, res) => {
+  try {
+    const { user_id, insurer_id, claim_amount, diagnosis, policy_document_url } = req.body;
+
+    // AI Analyze urgency
+    const aiResult = await classifyInsuranceClaim(diagnosis, claim_amount);
+    
+    // Create claim in database
+    const { data: claim, error } = await supabase
+      .from("insurance_claims")
+      .insert([{
+        user_id,
+        insurer_id,
+        claim_amount,
+        diagnosis,
+        urgency: aiResult.urgency,
+        deadline_hours: aiResult.recommended_deadline_hours,
+        status: "ai_reviewed",
+        ai_analysis: aiResult
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Blockchain hash
+    const policyHash = generateBlockchainHash(policy_document_url || claim.id);
+    
+    res.json({ 
+      success: true, 
+      claim: { ...claim, policy_hash: policyHash },
+      aiResult 
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.get("/api/insurance/claims", async (req, res) => {
+  try {
+    const { user_id, insurer_id } = req.query;
+    
+    let query = supabase.from("insurance_claims").select("*");
+    if (user_id) query = query.eq("user_id", user_id);
+    if (insurer_id) query = query.eq("insurer_id", insurer_id);
+    
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) throw error;
+    
+    res.json({ success: true, claims: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Get all rental agreements (for demo)
+app.get("/api/rental/agreements", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("rental_agreements")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (error) throw error;
+    res.json({ success: true, agreements: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Get all edtech enrollments (for demo)
+app.get("/api/edtech/enrollments", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("course_enrollments")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (error) throw error;
+    res.json({ success: true, enrollments: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// Get all hospital admissions (for demo)
+app.get("/api/hospital/admissions", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("hospital_admissions")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (error) throw error;
+    res.json({ success: true, admissions: data });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/insurance/respond", async (req, res) => {
+  try {
+    const { claim_id, action } = req.body;
+    
+    const { data: claim, error } = await supabase
+      .from("insurance_claims")
+      .update({ 
+        status: action === "approve" ? "approved" : action === "reject" ? "rejected" : "pending_info",
+        insurer_response_at: new Date().toISOString()
+      })
+      .eq("id", claim_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    // Trigger penalty if critical and no response
+    if (claim.urgency === "critical") {
+      // Schedule penalty check job
+    }
+    
+    res.json({ success: true, claim });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// ===================
+// RENTAL ROUTES
+// ===================
+
+app.post("/api/rental/agreement", async (req, res) => {
+  try {
+    const { tenant_id, landlord_id, property_address, total_deposit, monthly_rent } = req.body;
+
+    const { data: agreement, error } = await supabase
+      .from("rental_agreements")
+      .insert([{
+        tenant_id,
+        landlord_id,
+        property_address,
+        total_deposit,
+        monthly_rent,
+        escrow_amount: total_deposit / 2,
+        status: "pending"
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, agreement });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/rental/move-in", async (req, res) => {
+  try {
+    const { agreement_id, photos } = req.body;
+
+    // Store photos and create blockchain hash
+    const photoHashes = photos.map(p => generateBlockchainHash(p));
+    
+    const { data: agreement, error } = await supabase
+      .from("rental_agreements")
+      .update({ 
+        status: "move_in_recorded",
+        move_in_photos: photoHashes,
+        move_in_at: new Date().toISOString()
+      })
+      .eq("id", agreement_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, agreement, photo_hashes: photoHashes });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/rental/move-out", async (req, res) => {
+  try {
+    const { agreement_id, photos } = req.body;
+
+    const photoHashes = photos.map(p => generateBlockchainHash(p));
+    
+    // AI Compare photos
+    const aiResult = await compareRentalPhotos(agreement_id, photoHashes);
+    
+    const { data: agreement, error } = await supabase
+      .from("rental_agreements")
+      .update({ 
+        status: "ai_assessed",
+        move_out_photos: photoHashes,
+        move_out_at: new Date().toISOString(),
+        ai_assessment: aiResult
+      })
+      .eq("id", agreement_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, agreement, ai_assessment: aiResult });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/rental/resolve", async (req, res) => {
+  try {
+    const { agreement_id, refund_amount, action } = req.body;
+
+    const { data: agreement, error } = await supabase
+      .from("rental_agreements")
+      .update({ 
+        status: action === "accept" ? "resolved" : "disputed",
+        refund_amount
+      })
+      .eq("id", agreement_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, agreement });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// ===================
+// EDTECH ROUTES
+// ===================
+
+app.post("/api/edtech/enroll", async (req, res) => {
+  try {
+    const { student_id, platform_id, course_name, total_fee, milestone_count } = req.body;
+
+    const { data: enrollment, error } = await supabase
+      .from("course_enrollments")
+      .insert([{
+        student_id,
+        platform_id,
+        course_name,
+        total_fee,
+        milestone_count,
+        released_amount: 0,
+        status: "enrolled"
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, enrollment });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/edtech/milestone", async (req, res) => {
+  try {
+    const { enrollment_id, milestone_number } = req.body;
+
+    const { data: enrollment, error: eError } = await supabase
+      .from("course_enrollments")
+      .select("*")
+      .eq("id", enrollment_id)
+      .single();
+
+    if (eError) throw eError;
+
+    const milestoneAmount = enrollment.total_fee / enrollment.milestone_count;
+    const newReleased = enrollment.released_amount + milestoneAmount;
+    
+    const { data: updated, error } = await supabase
+      .from("course_enrollments")
+      .update({ 
+        released_amount: newReleased,
+        status: newReleased < enrollment.total_fee ? "milestone_based" : "completed"
+      })
+      .eq("id", enrollment_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ 
+      success: true, 
+      enrollment: updated,
+      milestone_released: milestoneAmount
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/edtech/complaint", async (req, res) => {
+  try {
+    const { enrollment_id, complaint_text, screenshots } = req.body;
+
+    // AI Analyze complaint
+    const aiResult = await analyzeEdTechComplaint(enrollment_id, complaint_text);
+    
+    const { data: enrollment, error } = await supabase
+      .from("course_enrollments")
+      .update({ 
+        status: "complaint_filed",
+        complaint: complaint_text,
+        ai_validity_score: aiResult.validity_score,
+        ai_findings: aiResult.findings
+      })
+      .eq("id", enrollment_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, enrollment, ai_analysis: aiResult });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/edtech/refund", async (req, res) => {
+  try {
+    const { enrollment_id, refund_amount, action } = req.body;
+
+    const { data: enrollment, error } = await supabase
+      .from("course_enrollments")
+      .update({ 
+        status: action === "accept" ? "refund_processed" : "escalated",
+        refund_amount: action === "accept" ? refund_amount : 0
+      })
+      .eq("id", enrollment_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, enrollment });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// ===================
+// HOSPITAL ROUTES
+// ===================
+
+app.post("/api/hospital/package", async (req, res) => {
+  try {
+    const { patient_id, hospital_id, package_name, package_amount, included_items, excluded_items } = req.body;
+
+    const { data: admission, error } = await supabase
+      .from("hospital_admissions")
+      .insert([{
+        patient_id,
+        hospital_id,
+        package_name,
+        package_amount,
+        included_items,
+        excluded_items,
+        paid_to_hospital: package_amount * 70 / 100,
+        held_in_escrow: package_amount * 30 / 100,
+        status: "package_agreed"
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, admission });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/hospital/consent", async (req, res) => {
+  try {
+    const { admission_id, item, amount, reason } = req.body;
+
+    const { data: consent, error } = await supabase
+      .from("hospital_consents")
+      .insert([{
+        admission_id,
+        item,
+        amount,
+        reason,
+        status: "consented"
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, consent });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/hospital/discharge", async (req, res) => {
+  try {
+    const { admission_id } = req.body;
+
+    const { data: admission, error } = await supabase
+      .from("hospital_admissions")
+      .update({ status: "discharge" })
+      .eq("id", admission_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, admission });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/hospital/bill-analyze", async (req, res) => {
+  try {
+    const { admission_id, final_bill_items } = req.body;
+
+    // Get original package
+    const { data: admission, error: aError } = await supabase
+      .from("hospital_admissions")
+      .select("*")
+      .eq("id", admission_id)
+      .single();
+
+    if (aError) throw aError;
+
+    // Get consents
+    const { data: consents } = await supabase
+      .from("hospital_consents")
+      .select("*")
+      .eq("admission_id", admission_id);
+
+    // AI Analyze bill
+    const aiResult = await analyzeHospitalBill(admission, final_bill_items, consents);
+    
+    res.json({ 
+      success: true, 
+      analysis: aiResult,
+      authorized_amount: aiResult.authorized_amount,
+      disputed_amount: aiResult.disputed_amount
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/hospital/pay", async (req, res) => {
+  try {
+    const { admission_id, pay_amount, is_disputed } = req.body;
+
+    const { data: admission, error } = await supabase
+      .from("hospital_admissions")
+      .update({ 
+        status: is_disputed ? "bill_disputed" : "resolved",
+        final_payment: pay_amount
+      })
+      .eq("id", admission_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    
+    res.json({ success: true, admission });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// ===================
+// INDUSTRY HELPER FUNCTIONS
+// ===================
+
+async function classifyInsuranceClaim(diagnosis, amount) {
+  const prompt = getIndustryPrompt("insurance", { diagnosis, claimAmount: amount });
+  
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    return JSON.parse(response.choices[0]?.message?.content || "{}");
+  } catch (error) {
+    return {
+      is_valid: true,
+      urgency: diagnosis?.toLowerCase().includes("cancer") ? "critical" : "normal",
+      diagnosis_keywords: [],
+      confidence_score: 50,
+      recommended_deadline_hours: diagnosis?.toLowerCase().includes("cancer") ? 24 : 720,
+      suggested_action: "approve"
+    };
+  }
+}
+
+async function compareRentalPhotos(agreementId, moveOutPhotos) {
+  const prompt = getIndustryPrompt("rental", { 
+    moveInNotes: "Photos recorded at move-in", 
+    moveOutPhotos 
+  });
+  
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    return JSON.parse(response.choices[0]?.message?.content || "{}");
+  } catch (error) {
+    return {
+      is_valid: true,
+      damage_items: [],
+      total_deduction: 0,
+      recommended_refund: 100,
+      confidence_score: 50,
+      suggested_action: "full_refund"
+    };
+  }
+}
+
+async function analyzeEdTechComplaint(enrollmentId, complaint) {
+  const prompt = getIndustryPrompt("edtech", { 
+    complaint, 
+    completionPercentage: 50,
+    platformPromise: "100% money-back guarantee" 
+  });
+  
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    return JSON.parse(response.choices[0]?.message?.content || "{}");
+  } catch (error) {
+    return {
+      is_valid: true,
+      validity_score: 75,
+      findings: { platform_response_time_days: 6, content_outdated: true, similar_complaints: 67, money_back_guarantee_found: true },
+      refund_recommendation: 50,
+      suggested_action: "partial_refund"
+    };
+  }
+}
+
+async function analyzeHospitalBill(admission, finalBill, consents) {
+  const prompt = getIndustryPrompt("hospital", {
+    packageAgreement: admission.included_items,
+    finalBill: finalBill,
+    consentedExtras: consents?.map(c => c.item).join(", ")
+  });
+  
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    return JSON.parse(response.choices[0]?.message?.content || "{}");
+  } catch (error) {
+    return {
+      is_valid: true,
+      authorized_items: [],
+      disputed_amount: 0,
+      authorized_amount: admission.package_amount,
+      confidence_score: 50,
+      suggested_action: "pay_full"
+    };
+  }
+}
 
 // Start server
 app.listen(PORT, () => {

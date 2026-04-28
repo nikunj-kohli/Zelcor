@@ -97,12 +97,24 @@ const Dashboard = () => {
         </div>
         <nav className="flex-1 px-4 space-y-2">
           <NavItem icon="home" label="Home" href="/dashboard" active />
-          <NavItem icon="shopping_cart" label="Demo Shop" href="/shop" />
+          <NavItem icon="shopping_cart" label="Shop" href="/shop" />
           <NavItem icon="lock" label="Escrows" href="/dashboard" />
           <NavItem icon="gavel" label="Complaints" href="/complaints" />
           <NavItem icon="verified" label="Certificates" href="/certificates" />
-          <NavItem icon="person" label="Profile" href="/profile" />
-          <NavItem icon="settings" label="Settings" href="/settings" />
+          
+          {/* Industry Navigation */}
+          <div className="pt-4 mt-4 border-t border-slate-100">
+            <p className="px-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Industries</p>
+          </div>
+          <NavItem icon="health_and_safety" label="Insurance" href="/insurance" />
+          <NavItem icon="apartment" label="Rental" href="/rental" />
+          <NavItem icon="school" label="EdTech" href="/edtech" />
+          <NavItem icon="local_hospital" label="Hospital" href="/hospital" />
+          
+          <div className="pt-4 mt-4 border-t border-slate-100">
+            <NavItem icon="person" label="Profile" href="/profile" />
+            <NavItem icon="settings" label="Settings" href="/settings" />
+          </div>
         </nav>
         <div className="p-8 border-t border-slate-50">
           <div className="bg-slate-50 p-4 rounded-2xl">
@@ -217,7 +229,7 @@ const Dashboard = () => {
                 <h3 className="font-h2 text-xl text-slate-800 tracking-tight">Quick Actions</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <QuickActionButton icon="add_circle" label="New Claim" href="/file-complaint" color="#1A5F7A" />
-                  <QuickActionButton icon="shopping_bag" label="Demo Shop" href="/shop" color="#2E8A57" />
+                  <QuickActionButton icon="shopping_bag" label="Shop" href="/shop" color="#2E8A57" />
                   <QuickActionButton icon="verified" label="Certificates" href="/certificates" color="#F2C94C" />
                   <QuickActionButton icon="history" label="Refund History" href="#" color="#F27A6B" />
                 </div>
